@@ -28,7 +28,7 @@ class Brain:
 
         # --- Context Analysis (Hybrid Brain) ---
         my_eta, foe_eta = tools.intercept_race(self.agent)
-        advantage = my_eta < (foe_eta - 0.2) # Clear win
+        advantage = my_eta < (foe_eta - 0.2)
         contested = abs(my_eta - foe_eta) < 0.5
         disadvantage = my_eta > foe_eta
 
@@ -47,7 +47,7 @@ class Brain:
                     highest_score = score
                     best_action = shot
 
-        # 2. Evaluate Wall Play
+        # 2. Evaluate Wall Play & Pinch
         if len(wall_hits) > 0:
              score = 75
              if self.agent.me.boost > 50: score += 10
@@ -57,23 +57,32 @@ class Brain:
                  highest_score = score
                  best_action = wall_hits[0]
 
+        # Pinch Opportunity: Ball near wall, we are close
+        if abs(ball_loc[0]) > 3800 or abs(ball_loc[1]) > 4800:
+            if dist_to_ball < 500:
+                pinch_score = 80
+                if pinch_score > highest_score:
+                    highest_score = pinch_score
+                    best_action = routines.pinch()
+
         # 3. Evaluate Defense / Save
         if threat_level > 80: # High danger
             save_score = 100
+
+            # Aerial Save?
+            if ball_loc[2] > 400:
+                 # Check if we can aerial
+                 pass # Standard find_hits usually covers aerial saves if target is goal.
+                 # But we might need a custom "block" shot if no goal shot found.
+
             if save_score > highest_score:
                 highest_score = save_score
                 target = my_goal + (ball_loc - my_goal) * 0.3
                 best_action = routines.goto(target, urgent=True)
 
         # 4. Evaluate Dribble & Flick (Bumblebee Logic)
-        # Ground Control: If ball is low and we have space
         if ball_loc[2] < 120 and dist_to_ball < 200 and advantage:
-             dribble_score = 80 # Prioritize possession
-
-             # If carrying but threatened -> Flick
-             # Simple heuristic: if we are already dribbling?
-             # Brain executes every tick, so we need to detect state or trust `routines` logic.
-             # If close to opponent goal or foe is close -> Flick
+             dribble_score = 80
              foe_dist = min([distance(f.location, my_loc) for f in self.agent.foes])
              if foe_dist < 500 or distance(my_loc, foe_goal) < 1500:
                  dribble_score = 85
@@ -94,18 +103,26 @@ class Brain:
                 best_action = routines.air_dribble()
 
         # 6. Evaluate Shadow Defense (Kamael/Cryo Patience)
-        # If disadvantaged, don't dive. Shadow.
         if disadvantage and threat_level < 80:
              shadow_score = 90
-             # Maintain position between ball and goal, matching lateral movement
+
              # Calculate shadow target
              ball_to_goal = normalize(my_goal - ball_loc)[0]
-             target = ball_loc + ball_to_goal * 1500 # Keep distance
-             # Offset to side to cover cutbacks?
-             # Simple shadow for now
+             target = ball_loc + ball_to_goal * 1500
+
+             # Half-Flip check
+             # If we need to go to target, but facing away?
+             to_target = target - my_loc
+             angle = angle_between(self.agent.me.forward, to_target)
+
+             if angle > 2.0 and magnitude(self.agent.me.velocity) < 500:
+                 # Facing backwards and moving slow -> Half Flip
+                 best_action = routines.half_flip()
+             else:
+                 best_action = routines.goto(target, urgent=True)
+
              if shadow_score > highest_score:
                  highest_score = shadow_score
-                 best_action = routines.goto(target, urgent=True)
 
         # 7. Evaluate Demo Hunt (Aggression)
         ball_safe = distance(ball_loc, my_goal) > 4000

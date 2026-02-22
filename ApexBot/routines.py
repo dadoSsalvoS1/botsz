@@ -1097,3 +1097,57 @@ class flick():
             if elapsed > 0.5:
                 agent.pop()
                 agent.push(recovery())
+
+class half_flip():
+    # Crucial for shadow defense and recovery
+    def __init__(self):
+        self.step = 0
+        self.start_time = -1
+
+    def run(self, agent):
+        if self.start_time == -1:
+            self.start_time = agent.time
+        elapsed = agent.time - self.start_time
+
+        if self.step == 0:
+            # Back Jump
+            agent.controller.jump = True
+            agent.controller.pitch = 1
+            if elapsed > 0.1:
+                self.step = 1
+                agent.controller.jump = False
+        elif self.step == 1:
+            # Back Dodge
+            agent.controller.jump = True
+            agent.controller.pitch = 1
+            if elapsed > 0.2:
+                self.step = 2
+        elif self.step == 2:
+            # Cancel + Roll
+            agent.controller.jump = False
+            agent.controller.pitch = -1 # Hold forward to cancel
+            agent.controller.roll = 1 # Roll right
+            if elapsed > 0.8:
+                agent.pop()
+                agent.push(recovery())
+
+class pinch():
+    # Simple wall pinch logic
+    def __init__(self):
+        pass
+
+    def run(self, agent):
+        # Drive aggressively at ball
+        ball_loc = agent.ball.location
+        my_loc = agent.me.location
+
+        # Aim for the center of the ball
+        target = ball_loc
+        defaultPD(agent, agent.me.local(target - my_loc))
+        defaultThrottle(agent, 2300)
+
+        dist = distance(my_loc, ball_loc)
+
+        if dist < 300:
+            # Dodge into it
+            agent.push(flip(agent.me.local(ball_loc - my_loc)))
