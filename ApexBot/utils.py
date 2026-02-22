@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import rlbot.utils.structures.game_data_struct as game_data_struct
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
 
@@ -65,7 +66,11 @@ class GoslingAgent(BaseAgent):
 
     def line(self, start, end, color=None):
         color = color if color != None else [255, 255, 255]
-        self.renderer.draw_line_3d(start, end, self.renderer.create_color(255, *color))
+        # Convert np.array to something compatible with draw_line_3d (requires x, y, z)
+        # We can use game_data_struct.Vector3
+        s = game_data_struct.Vector3(start[0], start[1], start[2])
+        e = game_data_struct.Vector3(end[0], end[1], end[2])
+        self.renderer.draw_line_3d(s, e, self.renderer.create_color(255, *color))
 
     def debug_stack(self):
         # Draws the stack on the screen
@@ -126,16 +131,16 @@ class car_object:
     # The carObject, and kin, convert the gametickpacket in something a little friendlier to use,
     # and are updated by GoslingAgent as the game runs
     def __init__(self, index, packet=None):
-        self.location = Vector3(0, 0, 0)
-        self.orientation = Matrix3(0, 0, 0)
-        self.velocity = Vector3(0, 0, 0)
-        self.angular_velocity = [0, 0, 0]
+        self.location = np.zeros(3)
+        self.orientation = np.eye(3)
+        self.velocity = np.zeros(3)
+        self.angular_velocity = np.zeros(3)
         self.demolished = False
         self.airborne = False
         self.supersonic = False
         self.jumped = False
         self.doublejumped = False
-        self.team = 0 # doesn't work
+        self.team = 0
         self.boost = 0
         self.index = index
         if packet != None:
@@ -143,16 +148,34 @@ class car_object:
             self.update(packet)
 
     def local(self, value):
-        # Shorthand for self.orientation.dot(value)
-        return self.orientation.dot(value)
+        # Shorthand for transforming a vector to local coordinates
+        return np.dot(value, self.orientation)
 
     def update(self, packet):
         car = packet.game_cars[self.index]
-        self.location.data = [car.physics.location.x, car.physics.location.y, car.physics.location.z]
-        self.velocity.data = [car.physics.velocity.x, car.physics.velocity.y, car.physics.velocity.z]
-        self.orientation = Matrix3(car.physics.rotation.pitch, car.physics.rotation.yaw, car.physics.rotation.roll)
-        self.angular_velocity = self.orientation.dot(
-            [car.physics.angular_velocity.x, car.physics.angular_velocity.y, car.physics.angular_velocity.z]).data
+        self.location = np.array([car.physics.location.x, car.physics.location.y, car.physics.location.z])
+        self.velocity = np.array([car.physics.velocity.x, car.physics.velocity.y, car.physics.velocity.z])
+
+        # Calculate orientation matrix
+        CR = math.cos(car.physics.rotation.roll)
+        SR = math.sin(car.physics.rotation.roll)
+        CP = math.cos(car.physics.rotation.pitch)
+        SP = math.sin(car.physics.rotation.pitch)
+        CY = math.cos(car.physics.rotation.yaw)
+        SY = math.sin(car.physics.rotation.yaw)
+
+        # GoslingUtils Matrix3 structure:
+        # Forward, Left, Up
+        forward = np.array([CP * CY, CP * SY, SP])
+        left = np.array([CY * SP * SR - CR * SY, SY * SP * SR + CR * CY, -CP * SR])
+        up = np.array([-CR * CY * SP - SR * SY, -CR * SY * SP + SR * CY, CP * CR])
+
+        self.orientation = np.column_stack((forward, left, up))
+
+        # Angular velocity in local coordinates
+        world_ang_vel = np.array([car.physics.angular_velocity.x, car.physics.angular_velocity.y, car.physics.angular_velocity.z])
+        self.angular_velocity = np.dot(world_ang_vel, self.orientation)
+
         self.demolished = car.is_demolished
         self.airborne = not car.has_wheel_contact
         self.supersonic = car.is_super_sonic
@@ -162,31 +185,28 @@ class car_object:
 
     @property
     def forward(self):
-        # A vector pointing forwards relative to the cars orientation. Its magnitude is 1
-        return self.orientation.forward
+        return self.orientation[:, 0]
 
     @property
     def left(self):
-        # A vector pointing left relative to the cars orientation. Its magnitude is 1
-        return self.orientation.left
+        return self.orientation[:, 1]
 
     @property
     def up(self):
-        # A vector pointing up relative to the cars orientation. Its magnitude is 1
-        return self.orientation.up
+        return self.orientation[:, 2]
 
 
 class ball_object:
     def __init__(self):
-        self.location = Vector3(0, 0, 0)
-        self.velocity = Vector3(0, 0, 0)
+        self.location = np.zeros(3)
+        self.velocity = np.zeros(3)
         self.latest_touched_time = 0
         self.latest_touched_team = 0
 
     def update(self, packet):
         ball = packet.game_ball
-        self.location.data = [ball.physics.location.x, ball.physics.location.y, ball.physics.location.z]
-        self.velocity.data = [ball.physics.velocity.x, ball.physics.velocity.y, ball.physics.velocity.z]
+        self.location = np.array([ball.physics.location.x, ball.physics.location.y, ball.physics.location.z])
+        self.velocity = np.array([ball.physics.velocity.x, ball.physics.velocity.y, ball.physics.velocity.z])
         self.latest_touched_time = ball.latest_touch.time_seconds
         self.latest_touched_team = ball.latest_touch.team
 
@@ -194,7 +214,7 @@ class ball_object:
 class boost_object:
     def __init__(self, index, location, large):
         self.index = index
-        self.location = Vector3(location.x, location.y, location.z)
+        self.location = np.array([location.x, location.y, location.z])
         self.active = True
         self.large = large
 
@@ -206,10 +226,10 @@ class goal_object:
     # This is a simple object that creates/holds goalpost locations for a given team (for soccer on standard maps only)
     def __init__(self, team):
         team = 1 if team == 1 else -1
-        self.location = Vector3(0, team * 5100, 320)  # center of goal line
+        self.location = np.array([0, team * 5100, 320])  # center of goal line
         # Posts are closer to x=750, but this allows the bot to be a little more accurate
-        self.left_post = Vector3(team * 850, team * 5100, 320)
-        self.right_post = Vector3(-team * 850, team * 5100, 320)
+        self.left_post = np.array([team * 850, team * 5100, 320])
+        self.right_post = np.array([-team * 850, team * 5100, 320])
 
 
 class game_object:
@@ -231,233 +251,86 @@ class game_object:
         self.kickoff = game.is_kickoff_pause
         self.match_ended = game.is_match_ended
 
+# --- Vector operations helpers ---
 
-class Matrix3:
-    # The Matrix3's sole purpose is to convert roll, pitch, and yaw data from the gametickpaket into an orientation matrix
-    # An orientation matrix contains 3 Vector3's
-    # Matrix3[0] is the "forward" direction of a given car
-    # Matrix3[1] is the "left" direction of a given car
-    # Matrix3[2] is the "up" direction of a given car
-    # If you have a distance between the car and some object, ie ball.location - car.location,
-    # you can convert that to local coordinates by dotting it with this matrix
-    # ie: local_ball_location = Matrix3.dot(ball.location - car.location)
-    def __init__(self, pitch, yaw, roll):
-        CP = math.cos(pitch)
-        SP = math.sin(pitch)
-        CY = math.cos(yaw)
-        SY = math.sin(yaw)
-        CR = math.cos(roll)
-        SR = math.sin(roll)
-        # List of 3 vectors, each descriping the direction of an axis: Forward, Left, and Up
-        self.data = [
-            Vector3(CP * CY, CP * SY, SP),
-            Vector3(CY * SP * SR - CR * SY, SY * SP * SR + CR * CY, -CP * SR),
-            Vector3(-CR * CY * SP - SR * SY, -CR * SY * SP + SR * CY, CP * CR)]
-        self.forward, self.left, self.up = self.data
+def normalize(vec):
+    norm = np.linalg.norm(vec)
+    if norm == 0:
+        return np.zeros_like(vec), 0.0
+    return vec / norm, norm
 
-    def __getitem__(self, key):
-        return self.data[key]
+def magnitude(vec):
+    return np.linalg.norm(vec)
 
-    def dot(self, vector):
-        return Vector3(self.forward.dot(vector), self.left.dot(vector), self.up.dot(vector))
+def distance(vec1, vec2):
+    return np.linalg.norm(vec1 - vec2)
 
+def flatten(vec):
+    return np.array([vec[0], vec[1], 0])
 
-class Vector3:
-    # This is the backbone of Gosling Utils. The Vector3 makes it easy to store positions, velocities, etc and perform vector math
-    # A Vector3 can be created with:
-    # - Anything that has a __getitem__ (lists, tuples, Vector3's, etc)
-    # - 3 numbers
-    # - A gametickpacket vector
-    def __init__(self, *args):
-        if hasattr(args[0], "__getitem__"):
-            self.data = list(args[0])
-        elif isinstance(args[0], game_data_struct.Vector3):
-            self.data = [args[0].x, args[0].y, args[0].z]
-        elif isinstance(args[0], game_data_struct.Rotator):
-            self.data = [args[0].pitch, args[0].yaw, args[0].roll]
-        elif len(args) == 3:
-            self.data = list(args)
-        else:
-            raise TypeError("Vector3 unable to accept %s" % (args))
+def cross(v1, v2):
+    return np.cross(v1, v2)
 
-    # Property functions allow you to use `Vector3.x` vs `Vector3[0]`
-    @property
-    def x(self):
-        return self.data[0]
+def dot(v1, v2):
+    return np.dot(v1, v2)
 
-    @x.setter
-    def x(self, value):
-        self.data[0] = value
+def clamp(vec, start, end):
+    # Clamps vector direction between start and end (2D XY plane)
+    s, _ = normalize(vec)
+    s_flat = flatten(s)
+    start_flat = flatten(start)
+    end_flat = flatten(end)
 
-    @property
-    def y(self):
-        return self.data[1]
+    right = np.dot(s_flat, np.cross(end_flat, np.array([0, 0, -1]))) < 0
+    left = np.dot(s_flat, np.cross(start_flat, np.array([0, 0, -1]))) > 0
 
-    @y.setter
-    def y(self, value):
-        self.data[1] = value
+    if np.dot(end_flat, np.cross(start_flat, np.array([0, 0, -1]))) > 0:
+        if right and left:
+            return vec
+    else:
+        if right or left:
+            return vec
 
-    @property
-    def z(self):
-        return self.data[2]
+    if np.dot(start_flat, s_flat) < np.dot(end_flat, s_flat):
+        return end
+    return start
 
-    @z.setter
-    def z(self, value):
-        self.data[2] = value
+def angle_between(v1, v2):
+    v1_norm, n1 = normalize(v1)
+    v2_norm, n2 = normalize(v2)
+    return math.acos(np.clip(np.dot(v1_norm, v2_norm), -1.0, 1.0))
 
-    def __getitem__(self, key):
-        # To access a single value in a Vector3, treat it like a list
-        # ie: to get the first (x) value use: Vector3[0]
-        # The same works for setting values
-        return self.data[key]
+def angle3D(v1, v2):
+    return angle_between(v1, v2)
 
-    def __setitem__(self, key, value):
-        self.data[key] = value
-
-    def __str__(self):
-        # Vector3's can be printed to console
-        return str(self.data)
-
-    __repr__ = __str__
-
-    def __eq__(self, value):
-        # Vector3's can be compared with:
-        # - Another Vector3, in which case True will be returned if they have the same values
-        # - A list, in which case True will be returned if they have the same values
-        # - A single value, in which case True will be returned if the Vector's length matches the value
-        if isinstance(value, Vector3):
-            return self.data == value.data
-        elif isinstance(value, list):
-            return self.data == value
-        else:
-            return self.magnitude() == value
-
-    # Vector3's support most operators (+-*/)
-    # If using an operator with another Vector3, each dimension will be independent
-    # ie x+x, y+y, z+z
-    # If using an operator with only a value, each dimension will be affected by that value
-    # ie x+v, y+v, z+v
-    def __add__(self, value):
-        if isinstance(value, Vector3):
-            return Vector3(self[0] + value[0], self[1] + value[1], self[2] + value[2])
-        return Vector3(self[0] + value, self[1] + value, self[2] + value)
-
-    __radd__ = __add__
-
-    def __sub__(self, value):
-        if isinstance(value, Vector3):
-            return Vector3(self[0] - value[0], self[1] - value[1], self[2] - value[2])
-        return Vector3(self[0] - value, self[1] - value, self[2] - value)
-
-    __rsub__ = __sub__
-
-    def __neg__(self):
-        return Vector3(-self[0], -self[1], -self[2])
-
-    def __mul__(self, value):
-        if isinstance(value, Vector3):
-            return Vector3(self[0] * value[0], self[1] * value[1], self[2] * value[2])
-        return Vector3(self[0] * value, self[1] * value, self[2] * value)
-
-    __rmul__ = __mul__
-
-    def __truediv__(self, value):
-        if isinstance(value, Vector3):
-            return Vector3(self[0] / value[0], self[1] / value[1], self[2] / value[2])
-        return Vector3(self[0] / value, self[1] / value, self[2] / value)
-
-    def __rtruediv__(self, value):
-        if isinstance(value, Vector3):
-            return Vector3(value[0] / self[0], value[1] / self[1], value[2] / self[2])
-        raise TypeError("unsupported rtruediv operands")
-
-    def magnitude(self):
-        # Magnitude() returns the length of the vector
-        return math.sqrt((self[0] * self[0]) + (self[1] * self[1]) + (self[2] * self[2]))
-
-    def normalize(self, return_magnitude=False):
-        # Normalize() returns a Vector3 that shares the same direction but has a length of 1.0
-        # Normalize(True) can also be used if you'd like the length of this Vector3 (used for optimization)
-        magnitude = self.magnitude()
-        if magnitude != 0:
-            if return_magnitude:
-                return Vector3(self[0] / magnitude, self[1] / magnitude, self[2] / magnitude), magnitude
-            return Vector3(self[0] / magnitude, self[1] / magnitude, self[2] / magnitude)
-        if return_magnitude:
-            return Vector3(0, 0, 0), 0
-        return Vector3(0, 0, 0)
-
-    # Linear algebra functions
-    def dot(self, value):
-        return self[0] * value[0] + self[1] * value[1] + self[2] * value[2]
-
-    def cross(self, value):
-        return Vector3((self[1] * value[2]) - (self[2] * value[1]), (self[2] * value[0]) - (self[0] * value[2]),
-                       (self[0] * value[1]) - (self[1] * value[0]))
-
-    def flatten(self):
-        # Sets Z (Vector3[2]) to 0
-        return Vector3(self[0], self[1], 0)
-
-    def render(self):
-        # Returns a list with the x and y values, to be used with pygame
-        return [self[0], self[1]]
-
-    def copy(self):
-        # Returns a copy of this Vector3
-        return Vector3(self.data[:])
-
-    def angle(self, value):
-        # Returns the angle between this Vector3 and another Vector3
-        return math.acos(round(self.flatten().normalize().dot(value.flatten().normalize()), 4))
-
-    def angle3D(self, value) -> float:
-        # Returns the angle between this Vector3 and another Vector3
-        return math.acos(round(self.normalize().dot(value.normalize()), 4))
-
-    def rotate(self, angle):
-        # Rotates this Vector3 by the given angle in radians
-        # Note that this is only 2D, in the x and y axis
-        return Vector3((math.cos(angle) * self[0]) - (math.sin(angle) * self[1]),
-                       (math.sin(angle) * self[0]) + (math.cos(angle) * self[1]), self[2])
-
-    def clamp(self, start, end):
-        # Similar to integer clamping, Vector3's clamp() forces the Vector3's direction between a start and end Vector3
-        # Such that Start < Vector3 < End in terms of clockwise rotation
-        # Note that this is only 2D, in the x and y axis
-        s = self.normalize()
-        right = s.dot(end.cross((0, 0, -1))) < 0
-        left = s.dot(start.cross((0, 0, -1))) > 0
-        if (right and left) if end.dot(start.cross((0, 0, -1))) > 0 else (right or left):
-            return self
-        if start.dot(s) < end.dot(s):
-            return end
-        return start
-
+def rotate_2d(vec, angle):
+    # Rotates vector by angle in radians in XY plane
+    x, y = vec[0], vec[1]
+    return np.array([
+        math.cos(angle) * x - math.sin(angle) * y,
+        math.sin(angle) * x + math.cos(angle) * y,
+        vec[2]
+    ])
 
 # --- utils.py content ---
 
-def backsolve(target, car, time, gravity = 650):
+def backsolve(target, car, time, gravity=650):
     #Finds the acceleration required for a car to reach a target in a specific amount of time
     d = target - car.location
     dvx = ((d[0]/time) - car.velocity[0]) / time
     dvy = ((d[1]/time) - car.velocity[1]) / time
     dvz = (((d[2]/time) - car.velocity[2]) / time) + (gravity * time)
-    return Vector3(dvx,dvy,dvz)
+    return np.array([dvx, dvy, dvz])
 
 def cap(x, low, high):
     #caps/clamps a number between a low and high value
-    if x < low:
-        return low
-    elif x > high:
-        return high
-    return x
+    return max(low, min(high, x))
 
 def defaultPD(agent, local_target, direction = 1.0):
     # points the car towards a given local target.
     # Direction can be changed to allow the car to steer towards a target while driving backwards
     local_target *= direction
-    up = agent.me.local(Vector3(0, 0, 1))  # where "up" is in local coordinates
+    up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
     target_angles = [
         math.atan2(local_target[2], local_target[0]),  # angle required to pitch towards target
         math.atan2(local_target[1], local_target[0]),  # angle required to yaw towards target
@@ -478,9 +351,10 @@ def defaultThrottle(agent, target_speed, direction = 1.0):
     agent.controller.boost = True if t > 150 and car_speed < 2275 and agent.controller.throttle == 1.0 else False
     return car_speed
 
-def in_field(point,radius):
+def in_field(point, radius):
     #determines if a point is inside the standard soccer field
-    point = Vector3(abs(point[0]),abs(point[1]),abs(point[2]))
+    # point is np array
+    point = np.abs(point)
     if point[0] > 4080 - radius:
         return False
     elif point[1] > 5900 - radius:
@@ -491,26 +365,32 @@ def in_field(point,radius):
         return False
     return True
 
-def find_slope(shot_vector,car_to_target):
+def find_slope(shot_vector, car_to_target):
     #Finds the slope of your car's position relative to the shot vector (shot vector is y axis)
-    #10 = you are on the axis and the ball is between you and the direction to shoot in
-    #-10 = you are on the wrong side
-    #1.0 = you're about 45 degrees offcenter
-    d = shot_vector.dot(car_to_target)
-    e = abs(shot_vector.cross((0,0,1)).dot(car_to_target))
-    return cap(d / e if e != 0 else 10*sign(d), -3.0,3.0)
+    d = np.dot(shot_vector, car_to_target)
+    e = abs(np.dot(np.cross(shot_vector, np.array([0,0,1])), car_to_target))
+    return cap(d / e if e != 0 else 10*sign(d), -3.0, 3.0)
 
 def post_correction(ball_location, left_target, right_target):
     #this function returns target locations that are corrected to account for the ball's radius
-    #If the left and right post swap sides, a goal cannot be scored
-    ball_radius = 120 #We purposly make this a bit larger so that our shots have a higher chance of success
-    goal_line_perp = (right_target - left_target).cross((0,0,1))
-    left = left_target + ((left_target - ball_location).normalize().cross((0,0,-1))*ball_radius)
-    right = right_target + ((right_target - ball_location).normalize().cross((0,0,1))*ball_radius)
-    left = left_target if (left-left_target).dot(goal_line_perp) > 0.0 else left
-    right = right_target if (right-right_target).dot(goal_line_perp) > 0.0 else right
-    swapped = True if (left - ball_location).normalize().cross((0,0,1)).dot((right - ball_location).normalize()) > -0.1 else False
-    return left,right,swapped
+    ball_radius = 120
+    goal_line_perp = np.cross((right_target - left_target), np.array([0,0,1]))
+
+    left_to_ball_norm, _ = normalize(left_target - ball_location)
+    right_to_ball_norm, _ = normalize(right_target - ball_location)
+
+    left = left_target + (np.cross(left_to_ball_norm, np.array([0,0,-1])) * ball_radius)
+    right = right_target + (np.cross(right_to_ball_norm, np.array([0,0,1])) * ball_radius)
+
+    left = left_target if np.dot((left-left_target), goal_line_perp) > 0.0 else left
+    right = right_target if np.dot((right-right_target), goal_line_perp) > 0.0 else right
+
+    # Check swapped
+    left_norm, _ = normalize(left - ball_location)
+    right_norm, _ = normalize(right - ball_location)
+    swapped = True if np.dot(np.cross(left_norm, np.array([0,0,1])), right_norm) > -0.1 else False
+
+    return left, right, swapped
 
 def quadratic(a,b,c):
     #Returns the two roots of a quadratic
@@ -522,8 +402,6 @@ def quadratic(a,b,c):
 
 def shot_valid(agent, shot, threshold = 45):
     #Returns True if the ball is still where the shot anticipates it to be
-    #First finds the two closest slices in the ball prediction to shot's intercept_time
-    #threshold controls the tolerance we allow the ball to be off by
     slices = agent.get_ball_prediction_struct().slices
     soonest = 0
     latest = len(slices)-1
@@ -536,11 +414,17 @@ def shot_valid(agent, shot, threshold = 45):
     #preparing to interpolate between the selected slices
     dt = slices[latest].game_seconds - slices[soonest].game_seconds
     time_from_soonest = shot.intercept_time - slices[soonest].game_seconds
-    slopes = (Vector3(slices[latest].physics.location) - Vector3(slices[soonest].physics.location)) * (1/dt)
+
+    p_soonest = np.array([slices[soonest].physics.location.x, slices[soonest].physics.location.y, slices[soonest].physics.location.z])
+    p_latest = np.array([slices[latest].physics.location.x, slices[latest].physics.location.y, slices[latest].physics.location.z])
+
+    slopes = (p_latest - p_soonest) * (1/dt)
+
     #Determining exactly where the ball will be at the given shot's intercept_time
-    predicted_ball_location = Vector3(slices[soonest].physics.location) + (slopes * time_from_soonest)
+    predicted_ball_location = p_soonest + (slopes * time_from_soonest)
+
     #Comparing predicted location with where the shot expects the ball to be
-    return (shot.ball_location - predicted_ball_location).magnitude() < threshold
+    return np.linalg.norm(shot.ball_location - predicted_ball_location) < threshold
 
 def side(x):
     #returns -1 for blue team and 1 for orange team
@@ -563,14 +447,10 @@ def steerPD(angle, rate):
 
 def lerp(a, b, t):
     #Linearly interpolate from a to b using t
-    #For instance, when t == 0, a is returned, and when t == 1, b is returned
-    #Works for both numbers and Vector3s
     return (b - a) * t + a
 
 def invlerp(a, b, v):
     #Inverse linear interpolation from a to b with value v
-    #For instance, it returns 0 if v == a, and returns 1 if v == b, and returns 0.5 if v is exactly between a and b
-    #Works for both numbers and Vector3s
     return (v - a)/(b - a)
 
 
@@ -583,17 +463,17 @@ def in_goal_area(agent):
 def detect_demo(agent):
     for car in agent.foes:
         if not car.airborne:
-            distance_to_target = (agent.me.location - car.location).magnitude()
-            velocity = (car.velocity).magnitude()
+            distance_to_target = np.linalg.norm(agent.me.location - car.location)
+            velocity = np.linalg.norm(car.velocity)
             velocity_needed = 2200 - velocity
             time_boosting_required = velocity_needed / 991.666
             boost_required = 33.3 * time_boosting_required
             distance_required = velocity * time_boosting_required + 0.5 * 991.666 * (time_boosting_required ** 2)
             time_to_target = distance_to_target / velocity
             aim_point = car.location + time_to_target * velocity
-            my_future_location = agent.me.location + time_to_target * agent.me.velocity.magnitude()
+            my_future_location = agent.me.location + time_to_target * np.linalg.norm(agent.me.velocity)
             can_demo = car.supersonic or (distance_required < distance_to_target and boost_required < car.boost)
-            if (aim_point - my_future_location).magnitude()  and can_demo:
+            if np.linalg.norm(aim_point - my_future_location) and can_demo:
                 if time_to_target < 0.75:
                     return False, car #disabled
     return False, None

@@ -1,19 +1,21 @@
 from math import atan2
+import math
+import numpy as np
 
 from utils import *
 
 
 # This file holds all of the mechanical tasks, called "routines", that the bot can do
 
-gravity: Vector3 = Vector3(0, 0, -650)
+gravity = np.array([0, 0, -650])
 # Aerial constants
-max_speed: float = 2300
-boost_accel: float = 1060
-throttle_accel: float = 200 / 3
-boost_per_second: float = 30
+max_speed = 2300
+boost_accel = 1060
+throttle_accel = 200 / 3
+boost_per_second = 30
 
 # Jump constants
-jump_speed: float = 291.667
+jump_speed = 291.667
 jump_acc = 1458.3333
 jump_min_duration = 0.025
 jump_max_duration = 0.2
@@ -51,11 +53,15 @@ class aerial_shot():
 
         car_to_ball = self.ball_location - agent.me.location
         # whether we are to the left or right of the shot vector
-        side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
+        # side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
+        side_of_shot = sign(np.dot(np.cross(self.shot_vector, np.array([0, 0, 1])), car_to_ball))
 
         car_to_intercept = self.intercept - agent.me.location
-        car_to_intercept_perp = car_to_intercept.cross((0, 0, side_of_shot))  # perpendicular
-        distance_remaining = car_to_intercept.flatten().magnitude()
+        # car_to_intercept_perp = car_to_intercept.cross((0, 0, side_of_shot))  # perpendicular
+        car_to_intercept_perp = np.cross(car_to_intercept, np.array([0, 0, side_of_shot]))
+
+        # distance_remaining = car_to_intercept.flatten().magnitude()
+        distance_remaining = magnitude(flatten(car_to_intercept))
 
         speed_required = distance_remaining / time_remaining
         # When still on the ground we pretend gravity doesn't exist, for better or worse
@@ -64,11 +70,15 @@ class aerial_shot():
 
         # The adjustment causes the car to circle around the dodge point in an effort to line up with the shot vector
         # The adjustment slowly decreases to 0 as the bot nears the time to jump
-        adjustment = car_to_intercept.angle(self.shot_vector) * distance_remaining / 1.57  # size of adjustment
+        # adjustment = car_to_intercept.angle(self.shot_vector) * distance_remaining / 1.57  # size of adjustment
+        adjustment = angle_between(car_to_intercept, self.shot_vector) * distance_remaining / 1.57
+
         adjustment *= (cap(self.jump_threshold - (acceleration_required[2]), 0.0,
                            self.jump_threshold) / self.jump_threshold)  # factoring in how close to jump we are
         # we don't adjust the final target if we are already jumping
-        final_target = self.intercept + ((car_to_intercept_perp.normalize() * adjustment) if self.jump_time == 0 else 0)
+        # final_target = self.intercept + ((car_to_intercept_perp.normalize() * adjustment) if self.jump_time == 0 else 0)
+        norm_perp, _ = normalize(car_to_intercept_perp)
+        final_target = self.intercept + ((norm_perp * adjustment) if self.jump_time == 0 else 0)
 
         # Some extra adjustment to the final target to ensure it's inside the field and we don't try to dirve through any goalposts to reach it
         #if abs(agent.me.location[1]) > 5120: final_target[0] = cap(final_target[0], -750, 750)
@@ -81,8 +91,8 @@ class aerial_shot():
 
         # drawing debug lines to show the dodge point and final target (which differs due to the adjustment)
         agent.line(agent.me.location, self.intercept)
-        agent.line(self.intercept - Vector3(0, 0, 100), self.intercept + Vector3(0, 0, 100), [255, 0, 0])
-        agent.line(final_target - Vector3(0, 0, 100), final_target + Vector3(0, 0, 100), [0, 255, 0])
+        agent.line(self.intercept - np.array([0, 0, 100]), self.intercept + np.array([0, 0, 100]), [255, 0, 0])
+        agent.line(final_target - np.array([0, 0, 100]), final_target + np.array([0, 0, 100]), [0, 255, 0])
 
         angles = defaultPD(agent, local_final_target)
 
@@ -97,7 +107,8 @@ class aerial_shot():
             time_since_jump = agent.time - self.jump_time
 
             # While airborne we boost if we're within 30 degrees of our local acceleration requirement
-            if agent.me.airborne and local_acceleration_required.magnitude() * time_remaining > 100:
+            # if agent.me.airborne and local_acceleration_required.magnitude() * time_remaining > 100:
+            if agent.me.airborne and magnitude(local_acceleration_required) * time_remaining > 100:
                 angles = defaultPD(agent, local_acceleration_required)
                 if abs(angles[0]) + abs(angles[1]) < 0.5:
                     agent.controller.boost = True
@@ -125,7 +136,7 @@ class flip():
     # Flip takes a vector in local coordinates and flips/dodges in that direction
     # cancel causes the flip to cancel halfway through, which can be used to half-flip
     def __init__(self, vector, cancel=False):
-        self.vector = vector.normalize()
+        self.vector, _ = normalize(vector)
         self.pitch = abs(self.vector[0]) * -sign(self.vector[0])
         self.yaw = abs(self.vector[1]) * sign(self.vector[1])
         self.cancel = cancel
@@ -166,15 +177,22 @@ class goto():
 
     def run(self, agent):
         car_to_target = self.target - agent.me.location
-        distance_remaining = car_to_target.flatten().magnitude()
+        # distance_remaining = car_to_target.flatten().magnitude()
+        distance_remaining = magnitude(flatten(car_to_target))
 
-        agent.line(self.target - Vector3(0, 0, 500), self.target + Vector3(0, 0, 500), [255, 0, 255])
+        agent.line(self.target - np.array([0, 0, 500]), self.target + np.array([0, 0, 500]), [255, 0, 255])
 
-        if self.vector != None:
+        if self.vector is not None:
             # See commends for adjustment in jump_shot or aerial for explanation
-            side_of_vector = sign(self.vector.cross((0, 0, 1)).dot(car_to_target))
-            car_to_target_perp = car_to_target.cross((0, 0, side_of_vector)).normalize()
-            adjustment = car_to_target.angle(self.vector) * distance_remaining / 3.14
+            # side_of_vector = sign(self.vector.cross((0, 0, 1)).dot(car_to_target))
+            side_of_vector = sign(np.dot(np.cross(self.vector, np.array([0, 0, 1])), car_to_target))
+
+            # car_to_target_perp = car_to_target.cross((0, 0, side_of_vector)).normalize()
+            car_to_target_perp, _ = normalize(np.cross(car_to_target, np.array([0, 0, side_of_vector])))
+
+            # adjustment = car_to_target.angle(self.vector) * distance_remaining / 3.14
+            adjustment = angle_between(car_to_target, self.vector) * distance_remaining / 3.14
+
             final_target = self.target + (car_to_target_perp * adjustment)
         else:
             final_target = self.target
@@ -193,7 +211,7 @@ class goto():
         agent.controller.boost = True if self.urgent and distance_remaining > 1500 else False
         agent.controller.handbrake = True if abs(angles[1]) > 2.3 else agent.controller.handbrake
 
-        velocity = 1 + agent.me.velocity.magnitude()
+        velocity = 1 + magnitude(agent.me.velocity)
 
         """
         demo_coming, democar = detect_demo(agent)
@@ -230,20 +248,28 @@ class goto_boost():
             self.start = agent.time
         elapsed = agent.time - self.start
         car_to_boost = self.boost.location - agent.me.location
-        distance_remaining = car_to_boost.flatten().magnitude()
+        distance_remaining = magnitude(flatten(car_to_boost))
 
-        agent.line(self.boost.location - Vector3(0, 0, 500), self.boost.location + Vector3(0, 0, 500), [0, 255, 0])
-        if self.target != None:
-            vector = (self.target - self.boost.location).normalize()
-            side_of_vector = sign(vector.cross((0, 0, 1)).dot(car_to_boost))
-            car_to_boost_perp = car_to_boost.cross((0, 0, side_of_vector)).normalize()
-            adjustment = car_to_boost.angle(vector) * distance_remaining / 3.14
+        agent.line(self.boost.location - np.array([0, 0, 500]), self.boost.location + np.array([0, 0, 500]), [0, 255, 0])
+        if self.target is not None:
+            # vector = (self.target - self.boost.location).normalize()
+            vector, _ = normalize(self.target - self.boost.location)
+
+            # side_of_vector = sign(vector.cross((0, 0, 1)).dot(car_to_boost))
+            side_of_vector = sign(np.dot(np.cross(vector, np.array([0, 0, 1])), car_to_boost))
+
+            # car_to_boost_perp = car_to_boost.cross((0, 0, side_of_vector)).normalize()
+            car_to_boost_perp, _ = normalize(np.cross(car_to_boost, np.array([0, 0, side_of_vector])))
+
+            # adjustment = car_to_boost.angle(vector) * distance_remaining / 3.14
+            adjustment = angle_between(car_to_boost, vector) * distance_remaining / 3.14
+
             final_target = self.boost.location + (car_to_boost_perp * adjustment)
-            car_to_target = (self.target - agent.me.location).magnitude()
+            car_to_target = magnitude(self.target - agent.me.location)
         else:
             adjustment = 9999
             car_to_target = 0
-            final_target = Vector3(self.boost.location[0], self.boost.location[1], self.boost.location[2])
+            final_target = np.array([self.boost.location[0], self.boost.location[1], self.boost.location[2]])
 
         # Some adjustment to the final target to ensure it's inside the field and we don't try to dirve through any goalposts to reach it
         #if abs(agent.me.location[1]) > 5120: final_target[0] = cap(final_target[0], -750, 750)
@@ -259,7 +285,7 @@ class goto_boost():
         agent.controller.boost = self.boost.large if abs(angles[1]) < 0.3 else False
         agent.controller.handbrake = True if abs(angles[1]) > 2.3 else agent.controller.handbrake
 
-        velocity = 1 + agent.me.velocity.magnitude()
+        velocity = 1 + magnitude(agent.me.velocity)
 
         """
         demo_coming, democar = detect_demo(agent)
@@ -320,11 +346,14 @@ class jump_shot():
         time_remaining = cap(raw_time_remaining, 0.001, 10.0)
         car_to_ball = self.ball_location - agent.me.location
         # whether we are to the left or right of the shot vector
-        side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
+        # side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
+        side_of_shot = sign(np.dot(np.cross(self.shot_vector, np.array([0, 0, 1])), car_to_ball))
 
         car_to_dodge_point = self.dodge_point - agent.me.location
-        car_to_dodge_perp = car_to_dodge_point.cross((0, 0, side_of_shot))  # perpendicular
-        distance_remaining = car_to_dodge_point.magnitude()
+        # car_to_dodge_perp = car_to_dodge_point.cross((0, 0, side_of_shot))  # perpendicular
+        car_to_dodge_perp = np.cross(car_to_dodge_point, np.array([0, 0, side_of_shot]))
+
+        distance_remaining = magnitude(car_to_dodge_point)
 
         speed_required = distance_remaining / time_remaining
         acceleration_required = backsolve(self.dodge_point, agent.me, time_remaining, 0 if not self.jumping else 650)
@@ -332,12 +361,19 @@ class jump_shot():
 
         # The adjustment causes the car to circle around the dodge point in an effort to line up with the shot vector
         # The adjustment slowly decreases to 0 as the bot nears the time to jump
-        adjustment = car_to_dodge_point.angle(self.shot_vector) * distance_remaining / 2.0  # size of adjustment
+        # adjustment = car_to_dodge_point.angle(self.shot_vector) * distance_remaining / 2.0  # size of adjustment
+        adjustment = angle_between(car_to_dodge_point, self.shot_vector) * distance_remaining / 2.0
+
         adjustment *= (cap(self.jump_threshold - (acceleration_required[2]), 0.0,
                            self.jump_threshold) / self.jump_threshold)  # factoring in how close to jump we are
         # we don't adjust the final target if we are already jumping
+        # final_target = self.dodge_point + (
+        #     (car_to_dodge_perp.normalize() * adjustment) if not self.jumping else 0) + Vector3(0, 0, 50)
+
+        norm_perp, _ = normalize(car_to_dodge_perp)
         final_target = self.dodge_point + (
-            (car_to_dodge_perp.normalize() * adjustment) if not self.jumping else 0) + Vector3(0, 0, 50)
+            (norm_perp * adjustment) if not self.jumping else 0) + np.array([0, 0, 50])
+
         # Ensuring our target isn't too close to the sides of the field, where our car would get messed up by the radius of the curves
 
         # Some adjustment to the final target to ensure it's inside the field and we don't try to dirve through any goalposts to reach it
@@ -350,8 +386,8 @@ class jump_shot():
 
         # drawing debug lines to show the dodge point and final target (which differs due to the adjustment)
         agent.line(agent.me.location, self.dodge_point)
-        agent.line(self.dodge_point - Vector3(0, 0, 100), self.dodge_point + Vector3(0, 0, 100), [255, 0, 0])
-        agent.line(final_target - Vector3(0, 0, 100), final_target + Vector3(0, 0, 100), [0, 255, 0])
+        agent.line(self.dodge_point - np.array([0, 0, 100]), self.dodge_point + np.array([0, 0, 100]), [255, 0, 0])
+        agent.line(final_target - np.array([0, 0, 100]), final_target + np.array([0, 0, 100]), [0, 255, 0])
 
         # Calling our drive utils to get us going towards the final target
         angles = defaultPD(agent, local_final_target, self.direction)
@@ -371,7 +407,7 @@ class jump_shot():
                 if agent.me.airborne:
                     agent.push(recovery())
             elif local_acceleration_required[2] > self.jump_threshold and local_acceleration_required[
-                2] > local_acceleration_required.flatten().magnitude():
+                2] > magnitude(flatten(local_acceleration_required)):
                 # Switch into the jump when the upward acceleration required reaches our threshold, and our lateral acceleration is negligible
                 self.jumping = True
         else:
@@ -419,7 +455,7 @@ class speed_flip():
         # Phase 0: Drive until speed or time condition
         if self.phase == 0:
             defaultThrottle(agent, 2300)
-            if agent.me.velocity.magnitude() > 1050: # Trigger speed flip
+            if magnitude(agent.me.velocity) > 1050: # Trigger speed flip
                 self.phase = 1
                 self.jump_timer = agent.time
 
@@ -445,7 +481,7 @@ class speed_flip():
             agent.controller.jump = True
             agent.controller.pitch = -1
             # Roll/Yaw towards target
-            angle = atan2(local_target.y, local_target.x)
+            angle = atan2(local_target[1], local_target[0])
             direction = sign(angle) if abs(angle) > 0.1 else 1
             agent.controller.roll = 0
             agent.controller.yaw = direction
@@ -473,19 +509,19 @@ class kickoff():
     # A simple 1v1 kickoff that just drives up behind the ball and dodges
     # misses the boost on the slight-offcenter kickoffs haha
     def run(self, agent):
-        target = agent.ball.location + Vector3(0, 200 * side(agent.team), 0)
+        target = agent.ball.location + np.array([0, 200 * side(agent.team), 0])
         local_target = agent.me.local(target - agent.me.location)
         defaultPD(agent, local_target)
         defaultThrottle(agent, 2300)
 
         # Use speed flip if far enough and have boost
-        if local_target.magnitude() > 1200:
+        if magnitude(local_target) > 1200:
              agent.pop()
              # Target slightly to side of ball to hit center?
              agent.push(speed_flip(agent.ball.location))
              return
 
-        if local_target.magnitude() < 650:
+        if magnitude(local_target) < 650:
             agent.pop()
             agent.push(flip(agent.me.local(agent.foe_goal.location - agent.me.location)))
 
@@ -498,10 +534,10 @@ class recovery():
 
 
     def run(self, agent):
-        if self.target != None:
-            local_target = agent.me.local((self.target - agent.me.location).flatten())
+        if self.target is not None:
+            local_target = agent.me.local(flatten(self.target - agent.me.location))
         else:
-            local_target = agent.me.local(agent.me.velocity.flatten())
+            local_target = agent.me.local(flatten(agent.me.velocity))
 
         defaultPD(agent, local_target)
         agent.controller.throttle = 1
@@ -516,19 +552,24 @@ class short_shot():
         self.target = target
 
     def run(self, agent):
-        car_to_ball, distance = (agent.ball.location - agent.me.location).normalize(True)
-        ball_to_target = (self.target - agent.ball.location).normalize()
+        car_to_ball, distance = normalize(agent.ball.location - agent.me.location)
+        ball_to_target, _ = normalize(self.target - agent.ball.location)
 
-        relative_velocity = car_to_ball.dot(agent.me.velocity - agent.ball.velocity)
+        relative_velocity = np.dot(car_to_ball, agent.me.velocity - agent.ball.velocity)
         if relative_velocity != 0.0:
             eta = cap(distance / cap(relative_velocity, 400, 2300), 0.0, 1.5)
         else:
             eta = 1.5
 
         # If we are approaching the ball from the wrong side the car will try to only hit the very edge of the ball
-        left_vector = car_to_ball.cross((0, 0, 1))
-        right_vector = car_to_ball.cross((0, 0, -1))
-        target_vector = -ball_to_target.clamp(left_vector, right_vector)
+        # left_vector = car_to_ball.cross((0, 0, 1))
+        # right_vector = car_to_ball.cross((0, 0, -1))
+        left_vector = np.cross(car_to_ball, np.array([0, 0, 1]))
+        right_vector = np.cross(car_to_ball, np.array([0, 0, -1]))
+
+        # target_vector = -ball_to_target.clamp(left_vector, right_vector)
+        target_vector = -clamp(ball_to_target, left_vector, right_vector)
+
         final_target = agent.ball.location + (target_vector * (distance / 2))
 
         # Some adjustment to the final target to ensure we don't try to dirve through any goalposts to reach it
@@ -537,7 +578,7 @@ class short_shot():
             final_target[0] = cap(final_target[0], -750, 750)
             final_target[1] = cap(final_target[1], -5050, 5050)
 
-        agent.line(final_target - Vector3(0, 0, 100), final_target + Vector3(0, 0, 100), [255, 255, 255])
+        agent.line(final_target - np.array([0, 0, 100]), final_target + np.array([0, 0, 100]), [255, 255, 255])
 
         angles = defaultPD(agent, agent.me.local(final_target - agent.me.location))
         defaultThrottle(agent, 2300 if distance > 1600 else 2300 - cap(1600 * abs(angles[1]), 0, 2050))
@@ -561,7 +602,7 @@ class wave_dash():
             self.start = agent.time
             elapsed = 0
             self.target = agent.me.forward + agent.me.up
-            self.target.normalize()
+            self.target, _ = normalize(self.target)
         else:
             elapsed = agent.time - self.start
         agent.line(agent.me.location, agent.me.location + (self.target * 200))
@@ -570,7 +611,7 @@ class wave_dash():
         elif elapsed < 0.15:
             agent.controller.jump = False
             # defaultPD(agent, self.target)
-            up = agent.me.local(Vector3(0, 0, 1))  # where "up" is in local coordinates
+            up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
             target_angles = [
                 math.atan2(self.target[2], self.target[0]),  # angle required to pitch towards target
                 math.atan2(self.target[1], self.target[0]),  # angle required to yaw towards target
@@ -606,14 +647,14 @@ class boost_wave_dash():
             self.start = agent.time
             elapsed = 0
             self.target = agent.me.forward - agent.me.up
-            self.target.normalize()
+            self.target, _ = normalize(self.target)
         else:
             elapsed = agent.time - self.start
         agent.line(agent.me.location, agent.me.location + (self.target * 200))
         if elapsed < 0.10:
             agent.controller.jump = True
             agent.controller.boost = True
-            up = agent.me.local(Vector3(0, 0, 1))  # where "up" is in local coordinates
+            up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
             target_angles = [
                 math.atan2(self.target[2], self.target[0]),  # angle required to pitch towards target
                 math.atan2(self.target[1], self.target[0]),  # angle required to yaw towards target
@@ -622,7 +663,7 @@ class boost_wave_dash():
         elif elapsed < 0.25:
             agent.controller.jump = False
             agent.controller.boost = True
-            up = agent.me.local(Vector3(0, 0, 1))  # where "up" is in local coordinates
+            up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
             target_angles = [
                 math.atan2(self.target[2], self.target[0]),  # angle required to pitch towards target
                 math.atan2(self.target[1], self.target[0]),  # angle required to yaw towards target
@@ -631,7 +672,7 @@ class boost_wave_dash():
         elif elapsed < 0.66:
             agent.controller.boost = True if agent.me.forward[2] < 0 else False
             self.target = agent.me.forward + agent.me.up
-            up = agent.me.local(Vector3(0, 0, 1))  # where "up" is in local coordinates
+            up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
             target_angles = [
                 math.atan2(self.target[2], self.target[0]),  # angle required to pitch towards target
                 math.atan2(self.target[1], self.target[0]),  # angle required to yaw towards target
@@ -663,7 +704,17 @@ class avoid_demo():
     def run(self, agent):
         botToTargetAngle = atan2(self.car.location[1] - agent.me.location[1],
                                  self.car.location[0] - agent.me.location[0])
-        yaw2 = atan2(agent.me.orientation[1][0], agent.me.orientation[0][0])
+        # yaw2 = atan2(agent.me.orientation[1][0], agent.me.orientation[0][0])
+        # In Matrix3, orientation[1] is left, orientation[0] is forward?
+        # car_object.orientation is [forward, left, up] columns?
+        # car_object.__init__:
+        # forward = np.array([CP * CY, CP * SY, SP])
+        # self.orientation = np.column_stack((forward, left, up))
+        # So agent.me.orientation[:, 0] is forward.
+        # agent.me.forward is already defined as property.
+
+        yaw2 = atan2(agent.me.forward[1], agent.me.forward[0])
+
         if botToTargetAngle + yaw2 < 0:
             self.direction = 1
         else:
@@ -687,7 +738,7 @@ class avoid_demo():
 
 class aerial():
 
-    def __init__(self, ball_location: Vector3, intercept_time: float, on_ground: bool, target: Vector3 = None):
+    def __init__(self, ball_location: np.array, intercept_time: float, on_ground: bool, target: np.array = None):
         self.ball_location = ball_location
         self.intercept_time = intercept_time
         self.target = target
@@ -736,8 +787,8 @@ class aerial():
             agent.controller.jump = 0
 
         delta_x = self.ball_location - xf
-        direction = delta_x.normalize()
-        if delta_x.magnitude() > 50:
+        direction, _ = normalize(delta_x)
+        if magnitude(delta_x) > 50:
             defaultPD(agent, agent.me.local(delta_x))
         else:
             if self.target is not None:
@@ -751,8 +802,9 @@ class aerial():
             agent.controller.yaw = 0
             agent.controller.steer = 0
 
-        if agent.me.forward.angle3D(direction) < 0.3:
-            if delta_x.magnitude() > 50:
+        # if agent.me.forward.angle3D(direction) < 0.3:
+        if angle3D(agent.me.forward, direction) < 0.3:
+            if magnitude(delta_x) > 50:
                 agent.controller.boost = 1
                 agent.controller.throttle = 0
             else:
@@ -777,16 +829,18 @@ class aerial():
                     T * jump_max_duration - 0.5 * jump_max_duration ** 2))
 
         delta_x = self.ball_location - xf
-        f = delta_x.normalize()
-        phi = f.angle3D(agent.me.forward)
+        f, _ = normalize(delta_x)
+        # phi = f.angle3D(agent.me.forward)
+        phi = angle3D(f, agent.me.forward)
+
         turn_time = 0.7 * (2 * math.sqrt(phi / 9))
 
         tau1 = turn_time * cap(1 - 0.3 / phi, 0, 1)
-        required_acc = (2 * delta_x.magnitude()) / ((T - tau1) ** 2)
+        required_acc = (2 * magnitude(delta_x)) / ((T - tau1) ** 2)
         ratio = required_acc / boost_accel
         tau2 = T - (T - tau1) * math.sqrt(1 - cap(ratio, 0, 1))
         velocity_estimate = vf + boost_accel * (tau2 - tau1) * f
         boos_estimate = (tau2 - tau1) * 30
         enough_boost = boos_estimate < 0.95 * agent.me.boost
         enough_time = abs(ratio) < 0.9
-        return velocity_estimate.magnitude() < 0.9 * max_speed and enough_boost and enough_time
+        return magnitude(velocity_estimate) < 0.9 * max_speed and enough_boost and enough_time

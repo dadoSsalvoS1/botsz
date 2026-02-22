@@ -5,7 +5,8 @@ from tools import *
 class ApexBot(GoslingAgent):
     def run(self):
         # Debug drawing
-        self.renderer.draw_string_3d(self.me.location, 2, 2, f"Speed: {round(self.me.velocity.magnitude(), 1)}", self.renderer.white())
+        loc = game_data_struct.Vector3(self.me.location[0], self.me.location[1], self.me.location[2])
+        self.renderer.draw_string_3d(loc, 2, 2, f"Speed: {round(magnitude(self.me.velocity), 1)}", self.renderer.white())
 
         # If no routine is active, decide on the next one
         if len(self.stack) < 1:
@@ -23,7 +24,7 @@ class ApexBot(GoslingAgent):
         # Include ourselves in the list
         all_cars = self.friends + [self.me]
         # Find car with minimum distance to ball
-        closest_car = min(all_cars, key=lambda car: (car.location - ball_loc).magnitude())
+        closest_car = min(all_cars, key=lambda car: magnitude(car.location - ball_loc))
 
         is_closest = (closest_car.index == self.index)
 
@@ -44,13 +45,17 @@ class ApexBot(GoslingAgent):
 
             # Target a point 1500 units from the ball towards our goal
             target_distance = 1500
-            target = ball_loc + goal_vec.normalize() * target_distance
+
+            # target = ball_loc + goal_vec.normalize() * target_distance
+            gv_norm, _ = normalize(goal_vec)
+            target = ball_loc + gv_norm * target_distance
 
             # Ensure the target is on our side of the ball relative to the goal (don't go past the ball)
             # Actually, the vector math above ensures we are on the goal side of the ball.
 
             # Simple bounds checking to stay in field
-            if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
+            # if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
+            if abs(target[0]) > 3500: target[0] = 3500 * sign(target[0])
 
             # Go to the defensive position
             self.push(goto(target))
