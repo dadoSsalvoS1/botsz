@@ -495,24 +495,39 @@ class speed_flip():
 
 
 class kickoff():
-    # A simple 1v1 kickoff that just drives up behind the ball and dodges
-    # misses the boost on the slight-offcenter kickoffs haha
+    # A robust 1v1 kickoff that uses speedflip and a controlled finisher
+    def __init__(self):
+        self.step = 0 # 0=SpeedFlip, 1=Finisher
+
     def run(self, agent):
-        target = agent.ball.location + Vector3(0, 200 * side(agent.team), 0)
-        local_target = agent.me.local(target - agent.me.location)
-        defaultPD(agent, local_target)
-        defaultThrottle(agent, 2300)
+        if self.step == 0:
+            # Calculate a precise target slightly offset to side to align
+            # Standard offset is usually 0 unless diagonal
+            # But let's just target ball for speedflip
+            target = agent.ball.location
+            local_target = agent.me.local(target - agent.me.location)
 
-        # Use speed flip if far enough and have boost
-        if local_target.magnitude() > 1200:
-             agent.pop()
-             # Target slightly to side of ball to hit center?
-             agent.push(speed_flip(agent.ball.location))
-             return
+            # If far away, use speed flip
+            if local_target.magnitude() > 1000:
+                agent.push(speed_flip(target))
+                # Note: We do NOT pop self. When speed_flip ends, kickoff resumes at step 0 or next tick
+                # But wait, speed_flip pops itself. Kickoff remains on stack.
+                # Next tick, if we are closer, we move to step 1.
+            else:
+                self.step = 1
 
-        if local_target.magnitude() < 650:
-            agent.pop()
-            agent.push(flip(agent.me.local(agent.foe_goal.location - agent.me.location)))
+        elif self.step == 1:
+            # Finisher: Drive to ball and flip into it to win 50/50
+            local_target = agent.me.local(agent.ball.location - agent.me.location)
+            defaultPD(agent, local_target)
+            defaultThrottle(agent, 2300)
+
+            # Flip logic
+            if local_target.magnitude() < 650:
+                agent.pop() # Finish kickoff routine
+                # Flip towards opponent goal to push ball there
+                flip_target = agent.foe_goal.location
+                agent.push(flip(agent.me.local(flip_target - agent.me.location)))
 
 
 class recovery():
