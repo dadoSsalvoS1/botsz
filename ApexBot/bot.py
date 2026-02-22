@@ -17,9 +17,20 @@ class ApexBot(GoslingAgent):
             self.push(kickoff())
             return
 
+        # 2. Mechanics & Recovery
+        # If we are on the wall and moving slowly, chain wall dash to gain speed
+        if is_wall_dash_viable(self):
+            self.push(wall_dash())
+            return
+
+        # If we are on the ground and moving slowly, chain wave dash to gain speed
+        if is_chain_wave_dash_viable(self):
+            self.push(chain_wave_dash())
+            return
+
         ball_loc = self.ball.location
 
-        # 2. Role Assignment: Are we the closest teammate to the ball?
+        # 3. Role Assignment: Are we the closest teammate to the ball?
         # Include ourselves in the list
         all_cars = self.friends + [self.me]
         # Find car with minimum distance to ball
@@ -27,7 +38,7 @@ class ApexBot(GoslingAgent):
 
         is_closest = (closest_car.index == self.index)
 
-        # 3. Execution
+        # 4. Execution
         if is_closest:
             # ATTACK MODE
             # Define target regions (Goal)
@@ -36,9 +47,16 @@ class ApexBot(GoslingAgent):
             }
             # Try to find a shot (Aerial, Jump, or Ground)
             # determine_shot will push the best shot routine, or a short_shot (dribble) if no shot is found.
+            # determine_shot now also checks for air_dribble opportunities
             determine_shot(self, self.foe_goal.location, targets, len(targets))
         else:
             # DEFENSE / SUPPORT MODE (Shadow Defense)
+
+            # If we are low on boost and not in immediate danger, collect boost
+            if self.me.boost < 20 and (ball_loc - self.me.location).magnitude() > 2000:
+                self.push(collect_boost())
+                return
+
             # Position ourselves between the ball and our goal, acting as a last line of defense
             goal_vec = self.friend_goal.location - ball_loc
 

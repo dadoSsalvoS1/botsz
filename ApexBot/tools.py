@@ -85,6 +85,11 @@ def find_hits(agent,targets):
 
 
 def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
+    # Check for Air Dribble opportunity first
+    if is_air_dribble_viable(agent):
+        agent.push(air_dribble())
+        return True
+
     if agent.ball.velocity.magnitude() > 0:
         hits = find_hits(agent, targets)
         if len(hits):
@@ -142,5 +147,26 @@ def determine_follow_up_shot(agent, targets, target_count):
 
 
 def should_aerial(agent, shot:aerial):
-    # Simple check, can be improved
+    # Check if we have enough boost
+    return agent.me.boost > 30
+
+def is_air_dribble_viable(agent):
+    # Ball should be high, near us, and we should have boost
+    dist = (agent.ball.location - agent.me.location).magnitude()
+    if agent.ball.location.z > 200 and dist < 1000 and agent.me.boost > 50:
+        return True
+    return False
+
+def is_wall_dash_viable(agent):
+    # On wall and needs speed
+    if agent.me.airborne: return False
+    if abs(agent.me.up.z) > 0.7: return False # On floor or ceiling
+    if agent.me.velocity.magnitude() > 2200: return False # Already fast
+    return True
+
+def is_chain_wave_dash_viable(agent):
+    # On ground, moving slowly, upright
+    if agent.me.airborne: return False
+    if agent.me.velocity.magnitude() > 1500: return False
+    if agent.me.up.z < 0.8: return False # Not upright enough
     return True

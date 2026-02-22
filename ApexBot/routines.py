@@ -790,3 +790,105 @@ class aerial():
         enough_boost = boos_estimate < 0.95 * agent.me.boost
         enough_time = abs(ratio) < 0.9
         return velocity_estimate.magnitude() < 0.9 * max_speed and enough_boost and enough_time
+
+
+class air_dribble():
+    def __init__(self):
+        self.step = 0
+        self.target = None
+
+    def run(self, agent):
+        # 1. Approach ball
+        # 2. Pop ball
+        # 3. Carry ball
+        # Simplified: Just carry for now assuming setup is handled by another routine or we are close
+
+        target = agent.ball.location + Vector3(0, 0, -50)  # Target slightly below ball center
+        local_target = agent.me.local(target - agent.me.location)
+        defaultPD(agent, local_target)
+
+        # Feather boost
+        distance = (agent.ball.location - agent.me.location).magnitude()
+        if distance < 500:
+            if agent.me.location.z < agent.ball.location.z:
+                agent.controller.boost = True
+            else:
+                agent.controller.boost = False
+        else:
+            agent.controller.boost = True
+
+        # Abort if ball touches ground or we run out of boost
+        if agent.ball.location.z < 100 or agent.me.boost < 1:
+            agent.pop()
+            agent.push(recovery())
+
+
+class wall_dash():
+    def __init__(self):
+        self.start = -1
+
+    def run(self, agent):
+        if self.start == -1:
+            self.start = agent.time
+
+        elapsed = agent.time - self.start
+
+        # 1. Jump
+        if elapsed < 0.05:
+            agent.controller.jump = True
+
+        # 2. Tilt nose down (which is pitch -1)
+        elif elapsed < 0.15:
+            agent.controller.jump = False
+            agent.controller.pitch = -1
+            agent.controller.handbrake = True
+
+        # 3. Dodge (Jump + Pitch -1)
+        elif elapsed < 0.20:
+            agent.controller.jump = True
+            agent.controller.pitch = -1
+            agent.controller.handbrake = True
+
+        else:
+            agent.pop()
+
+
+class chain_wave_dash():
+    def __init__(self):
+        self.step = 0
+
+    def run(self, agent):
+        if agent.me.velocity.magnitude() > 2200:
+            agent.pop()
+        elif not agent.me.airborne:
+            agent.push(wave_dash())
+
+
+class collect_boost():
+    def __init__(self):
+        self.start = -1
+
+    def run(self, agent):
+        if self.start == -1:
+            self.start = agent.time
+
+        # Find best boost
+        # Score = distance / (value)
+        best = None
+        best_score = 9999
+
+        for b in agent.boosts:
+            if b.active:
+                dist = (b.location - agent.me.location).magnitude()
+                value = 100 if b.large else 12
+                # heuristic: distance - value*10
+                score = dist - (value * 10)
+                if score < best_score:
+                    best_score = score
+                    best = b
+
+        if best:
+            agent.pop()
+            agent.push(goto_boost(best))
+        elif agent.time - self.start > 0.5:
+            agent.pop()
