@@ -839,9 +839,9 @@ class aerial():
         return magnitude(velocity_estimate) < 0.9 * max_speed and enough_boost and enough_time
 
 class air_dribble():
-    def __init__(self):
+    def __init__(self, target=None):
         self.step = 0
-        self.target = None
+        self.target = target
 
     def run(self, agent):
         ball_loc = agent.ball.location

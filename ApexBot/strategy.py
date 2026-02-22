@@ -1,6 +1,6 @@
 from utils import *
-from routines import *
-from tools import *
+import routines
+import tools
 import numpy as np
 
 class Brain:
@@ -15,15 +15,15 @@ class Brain:
 
         # Check kickoff
         if self.agent.kickoff_flag:
-            self.agent.push(kickoff())
+            self.agent.push(routines.kickoff())
             return
 
         # Find possibilities
         targets = {
             "goal": (self.agent.foe_goal.left_post, self.agent.foe_goal.right_post)
         }
-        hits = find_hits(self.agent, targets)
-        wall_hits = find_wall_hits(self.agent, targets)
+        hits = tools.find_hits(self.agent, targets)
+        wall_hits = tools.find_wall_hits(self.agent, targets)
 
         # --- Utility Calculation ---
         best_action = None
@@ -59,7 +59,7 @@ class Brain:
                 # Panic save: Go to goal line or intercept
                 # Better: Intercept between goal and ball
                 target = my_goal + (ball_loc - my_goal) * 0.3
-                best_action = goto(target, urgent=True)
+                best_action = routines.goto(target, urgent=True)
 
         # 4. Evaluate Air Dribble
         # Opportunities: Ball high, we have boost, we are close
@@ -71,14 +71,14 @@ class Brain:
             # Don't dribble if opponent is challenging closely
             if self.evaluate_threat() < 50 and dribble_score > highest_score:
                 highest_score = dribble_score
-                best_action = air_dribble()
+                best_action = routines.air_dribble()
 
         # 5. Evaluate Dribble / Pop (Ground)
         if ball_loc[2] < 100 and dist_to_ball < 300 and highest_score < 60:
              # We are right next to ball on ground -> start dribble (pop)
              # Reuse air_dribble logic which starts with a pop/lift
              highest_score = 60
-             best_action = air_dribble()
+             best_action = routines.air_dribble()
 
         # 6. Evaluate Boost
         if self.agent.me.boost < 20 and highest_score < 50:
@@ -94,7 +94,7 @@ class Brain:
 
             if best_boost:
                 highest_score = boost_score
-                best_action = goto_boost(best_boost, ball_loc)
+                best_action = routines.goto_boost(best_boost, ball_loc)
 
         # Execution
         if best_action:
@@ -113,7 +113,7 @@ class Brain:
             shadow_target[0] = cap(shadow_target[0], -3500, 3500)
             shadow_target[1] = cap(shadow_target[1], -5000, 5000)
 
-            self.agent.push(goto(shadow_target))
+            self.agent.push(routines.goto(shadow_target))
 
     def score_shot(self, shot):
         time_to_hit = shot.intercept_time - self.agent.time
@@ -126,7 +126,7 @@ class Brain:
         score -= (time_to_hit * 15)
 
         # Bonus for aerials (harder to save)
-        if isinstance(shot, aerial_shot) or isinstance(shot, aerial):
+        if isinstance(shot, routines.aerial_shot) or isinstance(shot, routines.aerial):
             score += 10
 
         return cap(score, 0, 100)
