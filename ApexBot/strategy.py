@@ -38,34 +38,51 @@ class Brain:
                     best_action = shot
 
         # 2. Evaluate Wall Play
-        if len(wall_hits) > 0 and highest_score < 80: # Only if no guaranteed goal
-             score = 75 # Static high score for now if valid
+        if len(wall_hits) > 0:
+             # Calculate utility of wall shot
+             # If we have a good shot on goal, stick to it, but if wall shot is unexpected/fast, take it.
+             # Simple heuristic: if we are close to wall and ball is high
+             score = 75
+             # Boost bonus
+             if self.agent.me.boost > 50: score += 10
+
              if score > highest_score:
                  highest_score = score
                  best_action = wall_hits[0]
 
         # 3. Evaluate Defense / Save
         opponent_threat = self.evaluate_threat()
-        if opponent_threat > 80:
-            # Panic save
-            save_score = 100 # Override everything
+        if opponent_threat > 80: # High danger
+            save_score = 100
             if save_score > highest_score:
                 highest_score = save_score
-                # Construct defensive move (e.g., intercept or shadow)
-                target = my_goal + (ball_loc - my_goal) * 0.5
+                # Panic save: Go to goal line or intercept
+                # Better: Intercept between goal and ball
+                target = my_goal + (ball_loc - my_goal) * 0.3
                 best_action = goto(target, urgent=True)
 
         # 4. Evaluate Air Dribble
-        if ball_loc[2] > 150 and self.agent.me.boost > 40 and highest_score < 70:
-            dribble_score = 70
-            if dribble_score > highest_score:
+        # Opportunities: Ball high, we have boost, we are close
+        dist_to_ball = distance(my_loc, ball_loc)
+        if ball_loc[2] > 200 and self.agent.me.boost > 40:
+            dribble_score = 65
+            if dist_to_ball < 1500: dribble_score += 15
+
+            # Don't dribble if opponent is challenging closely
+            if self.evaluate_threat() < 50 and dribble_score > highest_score:
                 highest_score = dribble_score
                 best_action = air_dribble()
 
-        # 5. Evaluate Boost
+        # 5. Evaluate Dribble / Pop (Ground)
+        if ball_loc[2] < 100 and dist_to_ball < 300 and highest_score < 60:
+             # We are right next to ball on ground -> start dribble (pop)
+             # Reuse air_dribble logic which starts with a pop/lift
+             highest_score = 60
+             best_action = air_dribble()
+
+        # 6. Evaluate Boost
         if self.agent.me.boost < 20 and highest_score < 50:
-            boost_score = 60
-            # Find best boost
+            boost_score = 55
             best_boost = None
             min_dist = 9999
             for b in self.agent.boosts:
@@ -86,30 +103,53 @@ class Brain:
             # Fallback: Shadow Defense
             defense_vec, _ = normalize(ball_loc - my_goal)
             shadow_target = ball_loc - defense_vec * 2000
+
+            # Rotate back post if ball is on side
+            if abs(ball_loc[0]) > 2000:
+                # Go to far post
+                shadow_target = my_goal + np.array([sign(ball_loc[0]) * -800, 0, 0])
+
             # Clamp
-            shadow_target[0] = cap(shadow_target[0], -3000, 3000)
-            shadow_target[1] = cap(shadow_target[1], -4500, 4500)
+            shadow_target[0] = cap(shadow_target[0], -3500, 3500)
+            shadow_target[1] = cap(shadow_target[1], -5000, 5000)
+
             self.agent.push(goto(shadow_target))
 
     def score_shot(self, shot):
-        # Score based on speed and intercept time
-        # Faster intercept = higher score
         time_to_hit = shot.intercept_time - self.agent.time
         if time_to_hit <= 0: return 0
 
-        score = 100 - (time_to_hit * 10) # Decay score over time
+        # Base score starts high
+        score = 100
 
-        # Bonus for goal shot (which it is, since it came from 'goal' target)
-        score += 20
+        # Penalize slowness
+        score -= (time_to_hit * 15)
+
+        # Bonus for aerials (harder to save)
+        if isinstance(shot, aerial_shot) or isinstance(shot, aerial):
+            score += 10
 
         return cap(score, 0, 100)
 
     def evaluate_threat(self):
-        # Simple threat: ball near our goal and opponent closer than us
         ball_loc = self.agent.ball.location
         my_goal = self.agent.friend_goal.location
+
         dist_to_goal = distance(ball_loc, my_goal)
 
-        if dist_to_goal < 2000:
-            return 90
-        return 0
+        threat = 0
+        if dist_to_goal < 3000: threat += 30
+        if dist_to_goal < 1500: threat += 40
+
+        # Check if opponent is closer to ball than us
+        closest_foe_dist = 99999
+        for foe in self.agent.foes:
+            d = distance(foe.location, ball_loc)
+            if d < closest_foe_dist: closest_foe_dist = d
+
+        my_dist = distance(self.agent.me.location, ball_loc)
+
+        if closest_foe_dist < my_dist:
+            threat += 30
+
+        return cap(threat, 0, 100)

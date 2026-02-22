@@ -67,11 +67,17 @@ def find_hits(agent,targets):
 
 def find_wall_hits(agent, targets):
     # Specialized detection for wall play
-    # Returns a list of wall_shot candidates if applicable
     hits = []
-    # Simple check: is ball near wall?
-    if abs(agent.ball.location[0]) > 3000 or abs(agent.ball.location[1]) > 4000:
-        hits.append(routines.wall_shot())
+
+    # Is ball near wall?
+    ball_loc = agent.ball.location
+    if abs(ball_loc[0]) > 3000 or abs(ball_loc[1]) > 4000:
+        # Are we close enough to make a play?
+        if distance(agent.me.location, ball_loc) < 2000:
+             # Basic physics check: is ball high enough to drive under?
+             if ball_loc[2] > 100:
+                 hits.append(routines.wall_shot())
+
     return hits
 
 def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
