@@ -116,12 +116,12 @@ def determine_shot(agent, target, targets, target_count, defensive=False, center
                 if len(agent.stack): agent.pop()
                 agent.push(pick_the_fastest[0])
                 if type(shot) == aerial: agent.aerialing = True
-                return defensive
+                return True # Always return True if a shot was pushed, regardless of defensive flag
     if center: return False
     if len(agent.stack): agent.pop()
     shot = short_shot(target)
     agent.push(shot)
-    return not center
+    return not center # Return True (unless center) as we pushed a shot (dribble)
 
 
 def determine_follow_up_shot(agent, targets, target_count):
@@ -146,10 +146,14 @@ def should_aerial(agent, shot:aerial):
     return agent.me.boost > 30
 
 def is_air_dribble_viable(agent):
-    # Ball should be high, near us, and we should have boost
+    # Ball should be high enough, near us, and we should have boost
+    # 500 z is roughly crossbar height
     dist = (agent.ball.location - agent.me.location).magnitude()
-    if agent.ball.location.z > 200 and dist < 1000 and agent.me.boost > 50:
-        return True
+    if agent.ball.location.z > 500 and dist < 1500 and agent.me.boost > 50:
+        # Check if we are facing the ball roughly
+        car_to_ball = (agent.ball.location - agent.me.location).normalize()
+        if agent.me.forward.dot(car_to_ball) > 0.5:
+            return True
     return False
 
 def is_wall_dash_viable(agent):
@@ -170,8 +174,6 @@ def is_chain_wave_dash_viable(agent):
 
 def intercept_time(car, ball_prediction):
     # Estimator for time to reach ball.
-    # Uses a simple physics model: distance / average_speed
-    # This is a heuristic and not as accurate as `find_hits` but faster for general logic.
     car_to_ball = (Vector3(ball_prediction.slices[0].physics.location) - car.location).magnitude()
     avg_speed = 1500 # Assume average game speed
     if car.boost > 50: avg_speed = 2000
@@ -185,7 +187,6 @@ def analyze_match_situation(agent):
     my_loc = agent.me.location
 
     # Check possession/pressure
-    # Are we closer than the closest enemy?
     closest_foe = None
     closest_foe_dist = 99999
     for foe in agent.foes:
@@ -196,8 +197,16 @@ def analyze_match_situation(agent):
 
     my_dist = (my_loc - ball_loc).magnitude()
 
+    # Simple distance check
     if my_dist < closest_foe_dist - 200:
-        return 'attacking'
+        # We are significantly closer
+        # Are we facing it?
+        to_ball = (ball_loc - my_loc).normalize()
+        if agent.me.forward.dot(to_ball) > 0.0:
+             return 'attacking'
+        else:
+             # Closer but awkward, maybe neutral/recover
+             return 'neutral'
     elif my_dist > closest_foe_dist + 200:
         return 'defending'
     else:

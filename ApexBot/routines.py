@@ -814,6 +814,12 @@ class air_dribble():
                 agent.controller.boost = True
             else:
                 agent.controller.boost = False
+
+            # Speed match - don't boost if we are going fast enough relative to ball
+            ball_speed = agent.ball.velocity.magnitude()
+            my_speed = agent.me.velocity.magnitude()
+            if my_speed > ball_speed + 500:
+                agent.controller.boost = False
         else:
             agent.controller.boost = True
 

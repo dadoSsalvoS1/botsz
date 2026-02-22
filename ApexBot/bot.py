@@ -21,21 +21,23 @@ class ApexBot(GoslingAgent):
             self.push(kickoff())
             return
 
-        # 2. Mechanics & Recovery
-        # If we are on the wall and moving slowly, chain wall dash to gain speed
-        if is_wall_dash_viable(self):
-            self.push(wall_dash())
-            return
+        ball_loc = self.ball.location
+        situation = analyze_match_situation(self)
 
-        # If we are on the ground and moving slowly, chain wave dash to gain speed
-        if is_chain_wave_dash_viable(self):
-            self.push(chain_wave_dash())
-            return
+        # 2. Mechanics & Recovery
+        # Only do advanced movement mechanics if not in immediate critical danger or trying to shoot
+        if situation != 'defending' or not is_ball_threatening(self):
+            # If we are on the wall and moving slowly, chain wall dash to gain speed
+            if is_wall_dash_viable(self):
+                self.push(wall_dash())
+                return
+
+            # If we are on the ground and moving slowly, chain wave dash to gain speed
+            if is_chain_wave_dash_viable(self):
+                self.push(chain_wave_dash())
+                return
 
         # 3. High Level Strategy "The Brain"
-        situation = analyze_match_situation(self)
-        ball_loc = self.ball.location
-
         if situation == 'attacking':
             # We have possession or are closest.
             # Tactics: Shoot, Dribble, Air Dribble
@@ -94,14 +96,15 @@ class ApexBot(GoslingAgent):
                      self.push(collect_boost())
                      return
 
-                self.push(goto(target))
+                # Urgent return to position
+                self.push(goto(target, urgent=True))
                 return
 
         else: # Neutral
             # 50/50 ball or loose ball far away
 
             # If low boost, prioritise collecting it before engaging
-            if self.me.boost < 30:
+            if self.me.boost < 30 and (ball_loc - self.me.location).magnitude() > 1000:
                 self.push(collect_boost())
                 return
 
