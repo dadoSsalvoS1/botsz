@@ -20,7 +20,8 @@ def find_hits(agent,targets):
             if abs(ball_location[1]) > 5250:
                 break
 
-            i += 15 - cap(int(ball_velocity//150),0,13)
+            # More granular search for SSL precision
+            i += 10 - cap(int(ball_velocity//150),0,8) # was 15, now 10 for finer steps
 
             car_to_ball = ball_location - agent.me.location
             direction, dist = normalize(car_to_ball)
@@ -45,79 +46,41 @@ def find_hits(agent,targets):
                         if in_field(ball_location - (200*best_shot_vector),1):
                             slope = find_slope(best_shot_vector,car_to_ball)
                             if forward_flag:
-                                # Relaxed constraints for jump_shot
-                                if ball_location[2] <= 300 and slope > -0.5: # was > 0.0
+                                # Highly permissive constraints, let the brain decide utility
+                                if ball_location[2] <= 300:
                                     hits[pair].append(routines.jump_shot(ball_location,intercept_time,best_shot_vector,slope))
 
-                                # Relaxed constraints for aerial_shot
-                                if ball_location[2] > 300 and ball_location[2] < 900 and slope > 0.5: # was < 600, slope > 1.0
+                                if ball_location[2] > 200:
                                     hits[pair].append(routines.aerial_shot(ball_location,intercept_time,best_shot_vector,slope))
 
-                                # Aerial check
-                                if ball_location[2] > 500: # was > 600
+                                if ball_location[2] > 400:
                                     shot = routines.aerial(ball_location - 92 * best_shot_vector, intercept_time, True,
                                                     target=best_shot_vector)
                                     if shot.is_viable(agent, agent.time) and should_aerial(agent, shot):
                                         hits[pair].append(shot)
 
-                            elif backward_flag and ball_location[2] <= 280 and slope > 0.25:
+                            elif backward_flag and ball_location[2] <= 280:
                                 hits[pair].append(routines.jump_shot(ball_location,intercept_time,best_shot_vector,slope,-1))
         else:
             i += 1
     return hits
 
+def find_wall_hits(agent, targets):
+    # Specialized detection for wall play
+    # Returns a list of wall_shot candidates if applicable
+    hits = []
+    # Simple check: is ball near wall?
+    if abs(agent.ball.location[0]) > 3000 or abs(agent.ball.location[1]) > 4000:
+        hits.append(routines.wall_shot())
+    return hits
 
 def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
-    # This function is being deprecated in favor of strategy.py but kept for compatibility
-    if magnitude(agent.ball.velocity) > 0:
-        hits = find_hits(agent, targets)
-        if len(hits):
-            pick_the_fastest = []
-            for i in range(1, 1 + target_count):
-                if len(hits[str(i)]):
-                    shot = hits[str(i)][0]
-                    hit_location = shot.ball_location
-                    hit_time = shot.intercept_time
-                    time_delta = hit_time - agent.time
-                    location_delta = distance(agent.me.location, hit_location)
-                    avg_speed = location_delta / time_delta
-                    pick_the_fastest.append(shot)
-                    if (avg_speed < 700):
-                        continue
-                    if not defensive:
-                        if len(agent.stack): agent.pop()
-                        agent.push(shot)
-                        if type(shot) == routines.aerial: agent.aerialing = True
-                        return True
-            if len(pick_the_fastest):
-                pick_the_fastest.sort(key=lambda shot: shot.intercept_time)
-                if len(agent.stack): agent.pop()
-                agent.push(pick_the_fastest[0])
-                if type(shot) == routines.aerial: agent.aerialing = True
-                return defensive
-    if center: return False
-    if len(agent.stack): agent.pop()
-    shot = routines.short_shot(target)
-    agent.push(shot)
-    return not center
-
+    # Deprecated by strategy.py
+    pass
 
 def determine_follow_up_shot(agent, targets, target_count):
-    if magnitude(agent.ball.velocity) > 0:
-        hits = find_hits(agent, targets)
-        if len(hits):
-            for i in range(1, 1 + target_count):
-                if len(hits[str(i)]):
-                    for shot in hits[str(i)]:
-                        if type(shot) != routines.aerial:
-                            continue
-                        else:
-                            agent.aerialing = False
-                            if len(agent.stack): agent.pop()
-                            agent.push(shot)
-                            return True
-    return False
-
+    # Deprecated by strategy.py
+    pass
 
 def should_aerial(agent, shot:routines.aerial):
     return True

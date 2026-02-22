@@ -841,23 +841,97 @@ class aerial():
 class air_dribble():
     def __init__(self):
         self.step = 0
+        self.target = None
 
     def run(self, agent):
-        # Very simple conceptual air dribble
-        # 1. Pop ball up
-        # 2. Fly to ball
-        # 3. Carry
+        ball_loc = agent.ball.location
+        my_loc = agent.me.location
+        dist_to_ball = distance(my_loc, ball_loc)
 
-        # For now, just a placeholder that pushes aerial() if ball is high
-        if agent.ball.location[2] > 500:
-             # Basic aerial logic
-             agent.push(aerial(agent.ball.location, agent.time + 1.0, not agent.me.airborne))
-        else:
-             agent.pop()
+        # Step 0: Setup / Approach
+        if self.step == 0:
+            if agent.me.airborne:
+                self.step = 2 # Already in air, go to carry
+            elif dist_to_ball > 500:
+                # Drive to ball
+                agent.push(goto(ball_loc, urgent=True))
+                # Note: push adds to stack, pop removes current.
+                # Ideally we want to drive *then* check again.
+                # But pushing a routine puts it on TOP.
+                # So next tick, goto runs. When goto pops, we are back here?
+                # No, air_dribble.run is called every tick if it's the active routine.
+                # GoslingUtils style: routines don't persist state well if they push other routines.
+                # Instead, we should control the car directly.
+                agent.pop() # Remove goto if we pushed it
+
+            # Simple approach logic: Drive under the ball
+            target = np.array([ball_loc[0], ball_loc[1], 0])
+            angles = defaultPD(agent, agent.me.local(target - my_loc))
+            defaultThrottle(agent, 1400) # Controlled speed
+
+            if dist_to_ball < 200:
+                self.step = 1
+                agent.controller.jump = True # Pop
+
+        # Step 1: Lift
+        elif self.step == 1:
+            agent.controller.jump = False
+            agent.controller.pitch = 1 # Tilt back
+            if agent.me.location[2] > 50: # Airborne
+                self.step = 2
+
+        # Step 2: Carry
+        elif self.step == 2:
+            # Match ball velocity
+            target = ball_loc + np.array([0, 0, -50]) # Aim slightly below ball
+
+            # Use aerial control logic (simplified from aerial class)
+            delta_x = target - my_loc
+            direction, _ = normalize(delta_x)
+            defaultPD(agent, agent.me.local(delta_x))
+
+            # Feather boost if pointing at ball
+            if angle3D(agent.me.forward, direction) < 0.5:
+                agent.controller.boost = True
+            else:
+                agent.controller.boost = False
+
+            if ball_loc[2] < 100: # Dropped
+                agent.pop()
 
 class wall_shot():
     def __init__(self):
-        pass
+        self.step = 0
+
     def run(self, agent):
-        # Placeholder for wall shot
-        agent.pop()
+        ball_loc = agent.ball.location
+        my_loc = agent.me.location
+
+        # Step 0: Drive up wall
+        if self.step == 0:
+            # Check if on wall (up vector is not vertical)
+            if agent.me.up[2] < 0.5:
+                # We are on wall
+                self.step = 1
+            else:
+                # Drive to wall nearest ball
+                wall_target = np.array([3500 * sign(ball_loc[0]), ball_loc[1], 0])
+                defaultPD(agent, agent.me.local(wall_target - my_loc))
+                defaultThrottle(agent, 2300)
+
+        # Step 1: Aim and Jump
+        elif self.step == 1:
+            # Aim at ball
+            defaultPD(agent, agent.me.local(ball_loc - my_loc))
+            defaultThrottle(agent, 1400)
+
+            if distance(my_loc, ball_loc) < 500:
+                agent.controller.jump = True
+                self.step = 2
+
+        # Step 2: Aerial to ball
+        elif self.step == 2:
+            agent.controller.jump = False
+            # Transition to aerial
+            agent.pop()
+            agent.push(aerial(ball_loc, agent.time + 0.5, False))

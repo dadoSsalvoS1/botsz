@@ -6,116 +6,110 @@ import numpy as np
 class Brain:
     def __init__(self, agent):
         self.agent = agent
-        self.state = "idle" # idle, attacking, defending, gathering_boost, clearing
         self.last_action_time = 0
 
     def execute(self):
-        # 1. State Analysis
         ball_loc = self.agent.ball.location
         my_loc = self.agent.me.location
         my_goal = self.agent.friend_goal.location
-        foe_goal = self.agent.foe_goal.location
-
-        dist_to_ball = distance(my_loc, ball_loc)
 
         # Check kickoff
         if self.agent.kickoff_flag:
             self.agent.push(kickoff())
             return
 
-        # Find shots
+        # Find possibilities
         targets = {
             "goal": (self.agent.foe_goal.left_post, self.agent.foe_goal.right_post)
         }
         hits = find_hits(self.agent, targets)
+        wall_hits = find_wall_hits(self.agent, targets)
 
-        # Check boost
-        need_boost = self.agent.me.boost < 30
+        # --- Utility Calculation ---
+        best_action = None
+        highest_score = -1
 
-        # Calculate intercept times
-        my_intercept_time = 999
-        best_shot = None
-
+        # 1. Evaluate Shooting (Standard & Aerial)
         if len(hits["goal"]) > 0:
-            best_shot = hits["goal"][0] # Hits are sorted by time? No, find_hits appends in order of slices (time)
-            my_intercept_time = best_shot.intercept_time - self.agent.time
+            for shot in hits["goal"]:
+                score = self.score_shot(shot)
+                if score > highest_score:
+                    highest_score = score
+                    best_action = shot
 
-        # Opponent intercept prediction (simplified)
-        opponent_intercept_time = 999
-        closest_foe = None
-        closest_foe_dist = 99999
+        # 2. Evaluate Wall Play
+        if len(wall_hits) > 0 and highest_score < 80: # Only if no guaranteed goal
+             score = 75 # Static high score for now if valid
+             if score > highest_score:
+                 highest_score = score
+                 best_action = wall_hits[0]
 
-        if len(self.agent.foes) > 0:
-            for foe in self.agent.foes:
-                d = distance(foe.location, ball_loc)
-                if d < closest_foe_dist:
-                    closest_foe_dist = d
-                    closest_foe = foe
+        # 3. Evaluate Defense / Save
+        opponent_threat = self.evaluate_threat()
+        if opponent_threat > 80:
+            # Panic save
+            save_score = 100 # Override everything
+            if save_score > highest_score:
+                highest_score = save_score
+                # Construct defensive move (e.g., intercept or shadow)
+                target = my_goal + (ball_loc - my_goal) * 0.5
+                best_action = goto(target, urgent=True)
 
-            # Rough estimate: distance / average speed (e.g. 1500)
-            opponent_intercept_time = closest_foe_dist / 1500
+        # 4. Evaluate Air Dribble
+        if ball_loc[2] > 150 and self.agent.me.boost > 40 and highest_score < 70:
+            dribble_score = 70
+            if dribble_score > highest_score:
+                highest_score = dribble_score
+                best_action = air_dribble()
 
-        # Decision Matrix
-
-        # 1. Clear Shot on Goal (High Priority)
-        if best_shot and my_intercept_time < opponent_intercept_time - 0.5:
-            # We can beat them to the ball comfortably
-            self.agent.push(best_shot)
-            return
-
-        # 2. Defensive Clear / Save
-        ball_in_our_half = dot(ball_loc - my_goal, self.agent.friend_goal.location - self.agent.foe_goal.location) > 0 # Wait, dot product direction?
-        # Friend goal at Y= +/- 5100. Vector from center to friend goal.
-        # Simple check:
-        # If team 0 (Blue, Y=-5120), balls with Y < 0 are in our half.
-        # If team 1 (Orange, Y=5120), balls with Y > 0 are in our half.
-
-        in_our_half = False
-        if self.agent.team == 0:
-            if ball_loc[1] < 0: in_our_half = True
-        else:
-            if ball_loc[1] > 0: in_our_half = True
-
-        if in_our_half and opponent_intercept_time < 3.0:
-            # Panic defense
-            # Try to hit it anywhere away from our net
-            # For now, just simplistic defense
-            defense_target = self.agent.friend_goal.location + (ball_loc - self.agent.friend_goal.location) * 0.5
-            self.agent.push(goto(defense_target, urgent=True))
-            return
-
-        # 3. Air Dribble Opportunity (Ball bouncing high or near wall)
-        if ball_loc[2] > 200 and self.agent.me.boost > 50:
-             # Basic heuristic for air dribble
-             # If we are close and ball is going up
-             if dist_to_ball < 1000 and self.agent.ball.velocity[2] > 100:
-                 self.agent.push(air_dribble())
-                 return
-
-        # 4. Gather Boost
-        if need_boost:
-            # Find closest boost
+        # 5. Evaluate Boost
+        if self.agent.me.boost < 20 and highest_score < 50:
+            boost_score = 60
+            # Find best boost
             best_boost = None
-            best_dist = 99999
-            for boost in self.agent.boosts:
-                if boost.active and boost.large:
-                    d = distance(my_loc, boost.location)
-                    if d < best_dist:
-                        best_dist = d
-                        best_boost = boost
+            min_dist = 9999
+            for b in self.agent.boosts:
+                if b.active and b.large:
+                    d = distance(my_loc, b.location)
+                    if d < min_dist:
+                        min_dist = d
+                        best_boost = b
 
-            if best_boost and best_dist < 3000: # Only go if reasonably close
-                self.agent.push(goto_boost(best_boost, self.agent.ball.location))
-                return
+            if best_boost:
+                highest_score = boost_score
+                best_action = goto_boost(best_boost, ball_loc)
 
-        # 5. Default / Positioning (Shadow Defense)
-        # Stay between ball and goal
-        defense_vec = (ball_loc - my_goal)
-        defense_vec, _ = normalize(defense_vec)
-        shadow_target = ball_loc - defense_vec * 1500
+        # Execution
+        if best_action:
+            self.agent.push(best_action)
+        else:
+            # Fallback: Shadow Defense
+            defense_vec, _ = normalize(ball_loc - my_goal)
+            shadow_target = ball_loc - defense_vec * 2000
+            # Clamp
+            shadow_target[0] = cap(shadow_target[0], -3000, 3000)
+            shadow_target[1] = cap(shadow_target[1], -4500, 4500)
+            self.agent.push(goto(shadow_target))
 
-        # Clamp target to field
-        shadow_target[0] = cap(shadow_target[0], -3500, 3500)
-        shadow_target[1] = cap(shadow_target[1], -5000, 5000)
+    def score_shot(self, shot):
+        # Score based on speed and intercept time
+        # Faster intercept = higher score
+        time_to_hit = shot.intercept_time - self.agent.time
+        if time_to_hit <= 0: return 0
 
-        self.agent.push(goto(shadow_target))
+        score = 100 - (time_to_hit * 10) # Decay score over time
+
+        # Bonus for goal shot (which it is, since it came from 'goal' target)
+        score += 20
+
+        return cap(score, 0, 100)
+
+    def evaluate_threat(self):
+        # Simple threat: ball near our goal and opponent closer than us
+        ball_loc = self.agent.ball.location
+        my_goal = self.agent.friend_goal.location
+        dist_to_goal = distance(ball_loc, my_goal)
+
+        if dist_to_goal < 2000:
+            return 90
+        return 0
