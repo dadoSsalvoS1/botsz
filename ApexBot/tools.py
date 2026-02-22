@@ -144,3 +144,41 @@ def determine_follow_up_shot(agent, targets, target_count):
 def should_aerial(agent, shot:aerial):
     # Simple check, can be improved
     return True
+
+def intercept_race(agent):
+    #returns the time it takes for the agent and the closest opponent to reach the ball
+    struct = agent.get_ball_prediction_struct()
+    agent_time = 999.0
+    opponent_time = 999.0
+
+    # Calculate agent intercept time
+    for i in range(0, struct.num_slices, 5):
+        slice = struct.slices[i]
+        time_remaining = slice.game_seconds - agent.time
+        if time_remaining > 0:
+            ball_location = Vector3(slice.physics.location)
+            distance = (ball_location - agent.me.location).magnitude()
+            # Simple approximation of car speed + some boost usage
+            speed = 2300 if agent.me.boost > 0 else 1410
+            # Very rough estimate
+            time_needed = distance / speed
+            if time_needed < time_remaining:
+                agent_time = time_remaining
+                break
+
+    # Calculate closest opponent intercept time
+    if len(agent.foes) > 0:
+        closest_foe = min(agent.foes, key=lambda f: (agent.ball.location - f.location).magnitude())
+        for i in range(0, struct.num_slices, 5):
+            slice = struct.slices[i]
+            time_remaining = slice.game_seconds - agent.time
+            if time_remaining > 0:
+                ball_location = Vector3(slice.physics.location)
+                distance = (ball_location - closest_foe.location).magnitude()
+                speed = 2300 if closest_foe.boost > 0 else 1410
+                time_needed = distance / speed
+                if time_needed < time_remaining:
+                    opponent_time = time_remaining
+                    break
+
+    return agent_time, opponent_time

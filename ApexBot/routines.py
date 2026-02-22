@@ -405,6 +405,7 @@ class speed_flip():
         self.start_time = -1
         self.jump_timer = 0
         self.phase = 0 # 0=Drive, 1=Jump, 2=Dodge, 3=Cancel
+        self.direction = 1
 
     def run(self, agent):
         if self.start_time == -1:
@@ -416,10 +417,14 @@ class speed_flip():
         local_target = agent.me.local(self.target - agent.me.location)
         defaultPD(agent, local_target)
 
+        # Decide direction (left/right) once
+        if self.phase == 0 and abs(local_target.y) > 0:
+            self.direction = sign(local_target.y)
+
         # Phase 0: Drive until speed or time condition
         if self.phase == 0:
             defaultThrottle(agent, 2300)
-            if agent.me.velocity.magnitude() > 1050: # Trigger speed flip
+            if agent.me.velocity.magnitude() > 300: # Trigger sooner
                 self.phase = 1
                 self.jump_timer = agent.time
 
@@ -429,26 +434,21 @@ class speed_flip():
             jump_elapsed = agent.time - self.jump_timer
             if jump_elapsed < 0.05:
                 agent.controller.jump = True
-                agent.controller.pitch = 0 # Neutral jump
-            elif jump_elapsed < 0.1:
+                agent.controller.pitch = 0
+            elif jump_elapsed < 0.1: # Wait for slight air
                 agent.controller.jump = False
                 agent.controller.pitch = 0
             else:
                 self.phase = 2
-                self.jump_timer = agent.time # Reset for dodge
+                self.jump_timer = agent.time
 
         # Phase 2: Dodge (Diagonal)
         elif self.phase == 2:
             defaultThrottle(agent, 2300)
-            # Diagonal front flip
-            # Pitch -1 = Forward
             agent.controller.jump = True
             agent.controller.pitch = -1
-            # Roll/Yaw towards target
-            angle = atan2(local_target.y, local_target.x)
-            direction = sign(angle) if abs(angle) > 0.1 else 1
-            agent.controller.roll = 0
-            agent.controller.yaw = direction
+            agent.controller.roll = 0.3 * self.direction # Slight roll
+            agent.controller.yaw = self.direction
             self.phase = 3
             self.jump_timer = agent.time
 
@@ -457,13 +457,17 @@ class speed_flip():
             defaultThrottle(agent, 2300)
             cancel_elapsed = agent.time - self.jump_timer
 
-            # Hold cancel (Pitch 1 = Back)
-            if cancel_elapsed < 0.6: # Cancel duration
-                agent.controller.pitch = 1
+            if cancel_elapsed < 0.05: # Hold dodge input briefly
+                 agent.controller.jump = False
+                 agent.controller.pitch = -1
+                 agent.controller.roll = 0.3 * self.direction
+                 agent.controller.yaw = self.direction
+            elif cancel_elapsed < 0.6: # Cancel duration
                 agent.controller.jump = False
-                # Continue rolling/yawing? Usually just hold pitch back
-                agent.controller.roll = 0
+                agent.controller.pitch = 1 # Cancel (Pull back)
+                agent.controller.roll = 0 # Stop rolling? Or hold?
                 agent.controller.yaw = 0
+                agent.controller.handbrake = True if cancel_elapsed > 0.4 else False # Slide on landing
             else:
                 agent.pop()
                 agent.push(recovery())
@@ -790,3 +794,139 @@ class aerial():
         enough_boost = boos_estimate < 0.95 * agent.me.boost
         enough_time = abs(ratio) < 0.9
         return velocity_estimate.magnitude() < 0.9 * max_speed and enough_boost and enough_time
+
+class shadow_defense:
+    def __init__(self):
+        self.goto = goto(Vector3(0,0,0)) # placeholder
+
+    def run(self, agent):
+        ball_loc = agent.ball.location
+        goal_loc = agent.friend_goal.location
+
+        # Vector from ball to goal
+        ball_to_goal = goal_loc - ball_loc
+        distance_to_ball = ball_to_goal.magnitude()
+
+        # Target position: maintain distance, stay between ball and goal
+        target_distance = cap(distance_to_ball / 2, 500, 1500)
+        target_loc = ball_loc + ball_to_goal.normalize() * target_distance
+
+        # Update goto target
+        self.goto.target = target_loc
+        self.goto.run(agent)
+
+        # Challenge condition
+        if distance_to_ball < 600:
+             agent.pop()
+             agent.push(short_shot(agent.foe_goal.location))
+             return
+
+class wall_recovery:
+    def __init__(self):
+        pass
+
+    def run(self, agent):
+        if not agent.me.airborne:
+            agent.pop()
+            return
+
+        # Find closest wall normal
+        pos = agent.me.location
+        wall_normal = Vector3(0,0,1) # Default to floor
+
+        if pos.x > 3500: wall_normal = Vector3(-1, 0, 0)
+        elif pos.x < -3500: wall_normal = Vector3(1, 0, 0)
+        elif pos.y > 4500: wall_normal = Vector3(0, -1, 0)
+        elif pos.y < -4500: wall_normal = Vector3(0, 1, 0)
+        elif pos.z > 1900: wall_normal = Vector3(0, 0, -1) # Ceiling
+
+        # Target direction (velocity)
+        target = agent.me.velocity.normalize()
+        if target.magnitude() == 0: target = agent.me.forward
+
+        # Calculate local coordinates of target and wall_normal
+        local_target = agent.me.local(target)
+        local_up = agent.me.local(wall_normal)
+
+        # PD Loop
+        # Pitch/Yaw to look at target
+        target_angles = [
+            math.atan2(local_target[2], local_target[0]),  # pitch
+            math.atan2(local_target[1], local_target[0]),  # yaw
+            math.atan2(local_up[1], local_up[2])           # roll (align up vector)
+        ]
+
+        agent.controller.steer = steerPD(target_angles[1], 0)
+        agent.controller.pitch = steerPD(target_angles[0], agent.me.angular_velocity[1] / 4)
+        agent.controller.yaw = steerPD(target_angles[1], -agent.me.angular_velocity[2] / 4)
+        agent.controller.roll = steerPD(target_angles[2], agent.me.angular_velocity[0] / 2)
+
+        agent.controller.throttle = 1
+
+class pop:
+    def __init__(self):
+        self.timer = 0
+    def run(self, agent):
+        if self.timer == 0: self.timer = agent.time
+        elapsed = agent.time - self.timer
+        if elapsed < 0.1:
+             agent.controller.jump = True
+        else:
+             agent.pop()
+
+class carry:
+    def __init__(self):
+        pass
+    def run(self, agent):
+        ball_local = agent.me.local(agent.ball.location - agent.me.location)
+
+        # Steering (X)
+        steer_factor = 0.015
+        agent.controller.steer = cap(ball_local.x * steer_factor, -1, 1)
+
+        # Throttle (Y)
+        target_y = 30
+        error_y = ball_local.y - target_y
+
+        agent.controller.throttle = cap(error_y * 0.05, -1, 1)
+        agent.controller.boost = True if error_y > 50 else False
+
+        # Visuals
+        agent.line(agent.me.location, agent.me.location + agent.me.forward * 200, [0, 255, 0])
+
+        # Drop check
+        if ball_local.z < 80 or ball_local.magnitude() > 250:
+            agent.pop()
+
+class flick:
+    def __init__(self):
+        self.step = 0
+        self.timer = 0
+    def run(self, agent):
+        if self.step == 0:
+            agent.controller.jump = True
+            self.timer = agent.time
+            self.step = 1
+        elif self.step == 1:
+            elapsed = agent.time - self.timer
+            if elapsed > 0.05:
+                agent.controller.jump = False
+                self.step = 2
+                self.timer = agent.time
+            else:
+                 agent.controller.jump = True
+        elif self.step == 2:
+            elapsed = agent.time - self.timer
+            if elapsed > 0.05:
+                 agent.controller.jump = True
+                 agent.controller.pitch = -1
+                 agent.controller.roll = 0
+                 agent.controller.yaw = 0
+                 self.step = 3
+                 self.timer = agent.time
+        elif self.step == 3:
+             elapsed = agent.time - self.timer
+             agent.controller.jump = False
+             if elapsed > 0.5:
+                 agent.pop()
+                 agent.push(recovery())
