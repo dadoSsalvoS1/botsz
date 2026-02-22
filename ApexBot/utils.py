@@ -1,6 +1,7 @@
 import math
 import numpy as np
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
+from rlbot.utils.structures.game_data_struct import Vector3 as RLBotVector3
 
 
 # --- objects.py content ---
@@ -66,9 +67,9 @@ class GoslingAgent(BaseAgent):
     def line(self, start, end, color=None):
         color = color if color != None else [255, 255, 255]
         # Convert np.array to something compatible with draw_line_3d (requires x, y, z)
-        # We use a simple class to avoid depending on rlbot structs for internal logic
-        s = SimpleVector3(start[0], start[1], start[2])
-        e = SimpleVector3(end[0], end[1], end[2])
+        # We use RLBot's Vector3 struct to ensure compatibility with the renderer
+        s = RLBotVector3(start[0], start[1], start[2])
+        e = RLBotVector3(end[0], end[1], end[2])
         self.renderer.draw_line_3d(s, e, self.renderer.create_color(255, *color))
 
     def debug_stack(self):
@@ -124,12 +125,6 @@ class GoslingAgent(BaseAgent):
     def run(self):
         # override this with your strategy code
         pass
-
-class SimpleVector3:
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
 
 class car_object:
     # The carObject, and kin, convert the gametickpacket in something a little friendlier to use,
