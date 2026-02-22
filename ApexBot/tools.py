@@ -1,4 +1,4 @@
-from routines import *
+import routines
 from utils import *
 
 #This file is for strategic tools
@@ -69,16 +69,16 @@ def find_hits(agent,targets):
                             slope = find_slope(best_shot_vector,car_to_ball)
                             if forward_flag:
                                 if ball_location[2] <= 300 and slope > 0.0:
-                                    hits[pair].append(jump_shot(ball_location,intercept_time,best_shot_vector,slope))
+                                    hits[pair].append(routines.jump_shot(ball_location,intercept_time,best_shot_vector,slope))
                                 if ball_location[2] > 300 and ball_location[2] < 600 and slope > 1.0 and (ball_location[2]-250) * 0.14 > agent.me.boost:
-                                    hits[pair].append(aerial_shot(ball_location,intercept_time,best_shot_vector,slope))
+                                    hits[pair].append(routines.aerial_shot(ball_location,intercept_time,best_shot_vector,slope))
                                 if ball_location.z > 600:
-                                    shot = aerial(ball_location - 92 * best_shot_vector, intercept_time, True,
+                                    shot = routines.aerial(ball_location - 92 * best_shot_vector, intercept_time, True,
                                                     target=best_shot_vector)
                                     if shot.is_viable(agent, agent.time) and should_aerial(agent, shot):
                                         hits[pair].append(shot)
                             elif backward_flag and ball_location[2] <= 280 and slope > 0.25:
-                                hits[pair].append(jump_shot(ball_location,intercept_time,best_shot_vector,slope,-1))
+                                hits[pair].append(routines.jump_shot(ball_location,intercept_time,best_shot_vector,slope,-1))
         else:
             i += 1
     return hits
@@ -109,17 +109,17 @@ def determine_shot(agent, target, targets, target_count, defensive=False, center
                     if not defensive:
                         if len(agent.stack): agent.pop()
                         agent.push(shot)
-                        if type(shot) == aerial: agent.aerialing = True
+                        if type(shot) == routines.aerial: agent.aerialing = True
                         return True
             if len(pick_the_fastest):
                 pick_the_fastest.sort(key=lambda shot: shot.intercept_time)
                 if len(agent.stack): agent.pop()
                 agent.push(pick_the_fastest[0])
-                if type(shot) == aerial: agent.aerialing = True
+                if type(shot) == routines.aerial: agent.aerialing = True
                 return defensive
     if center: return False
     if len(agent.stack): agent.pop()
-    shot = short_shot(target)
+    shot = routines.short_shot(target)
     agent.push(shot)
     return not center
 
@@ -131,7 +131,7 @@ def determine_follow_up_shot(agent, targets, target_count):
             for i in range(1, 1 + target_count):
                 if len(hits[str(i)]):
                     for shot in hits[str(i)]:
-                        if type(shot) != aerial:
+                        if type(shot) != routines.aerial:
                             continue
                         else:
                             agent.aerialing = False
@@ -141,6 +141,6 @@ def determine_follow_up_shot(agent, targets, target_count):
     return False
 
 
-def should_aerial(agent, shot:aerial):
+def should_aerial(agent, shot:routines.aerial):
     # Simple check, can be improved
     return True
