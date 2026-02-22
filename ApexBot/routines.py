@@ -18,6 +18,24 @@ jump_acc = 1458.3333
 jump_min_duration = 0.025
 jump_max_duration = 0.2
 
+# --- Helper Functions for Mechanics ---
+
+def is_wall_dash_viable(agent):
+    # On wall and needs speed
+    if agent.me.airborne: return False
+    if abs(agent.me.up.z) > 0.7: return False # On floor or ceiling
+    if agent.me.velocity.magnitude() > 2200: return False # Already fast
+    return True
+
+def is_chain_wave_dash_viable(agent):
+    # On ground, moving slowly, upright
+    if agent.me.airborne: return False
+    if agent.me.velocity.magnitude() > 1500: return False
+    if agent.me.up.z < 0.8: return False # Not upright enough
+    return True
+
+# --------------------------------------
+
 class atba():
     # An example routine that just drives towards the ball at max speed
     def run(self, agent):
@@ -204,10 +222,14 @@ class goto():
         if distance_remaining < 350:
             agent.pop()
         elif abs(angles[1]) < 0.05 and velocity > 600 and velocity < 2150 and distance_remaining / velocity > 2.0:
+            # Integrated mechanics logic
             if agent.me.up[2] < 0.9 or agent.me.airborne:
                 agent.push(flip(local_target))
             elif abs(agent.controller.yaw) < 0.2:
-                if agent.me.boost > 20 and self.urgent:
+                # Check for wall dash
+                if is_wall_dash_viable(agent):
+                    agent.push(wall_dash())
+                elif agent.me.boost > 20 and self.urgent:
                     agent.push(boost_wave_dash())
                 else:
                     agent.push(wave_dash())
@@ -278,7 +300,10 @@ class goto_boost():
                 distance_remaining / velocity > 2.0 or (adjustment < 90 and car_to_target / velocity > 2.0)):
             # to prevent oversteering
             if abs(agent.controller.yaw) < 0.2:
-                if agent.me.up[2] < 0.9 or agent.me.airborne:
+                # Check for wall dash
+                if is_wall_dash_viable(agent):
+                    agent.push(wall_dash())
+                elif agent.me.up[2] < 0.9 or agent.me.airborne:
                     agent.push(flip(local_target))
                 elif agent.me.boost > 20:
                     agent.push(boost_wave_dash())

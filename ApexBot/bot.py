@@ -25,14 +25,8 @@ class ApexBot(GoslingAgent):
         situation = analyze_match_situation(self)
 
         # 2. Mechanics & Recovery
-        # If we are on the wall and moving slowly, chain wall dash to gain speed
-        # Wall dash is situational but generally safe if on the wall
-        if is_wall_dash_viable(self):
-            self.push(wall_dash())
-            return
-
-        # REMOVED GLOBAL CHAIN WAVE DASH SPAM
-        # Wave dashes should only happen if we have a target and are far away
+        # REMOVED GLOBAL WALL DASH AND WAVE DASH SPAM
+        # Mechanics are now integrated into specific routines like goto() or strategy blocks
 
         # 3. High Level Strategy "The Brain"
         if situation == 'attacking':

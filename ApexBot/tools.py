@@ -156,24 +156,12 @@ def is_air_dribble_viable(agent):
             return True
     return False
 
-def is_wall_dash_viable(agent):
-    # On wall and needs speed
-    if agent.me.airborne: return False
-    if abs(agent.me.up.z) > 0.7: return False # On floor or ceiling
-    if agent.me.velocity.magnitude() > 2200: return False # Already fast
-    return True
-
-def is_chain_wave_dash_viable(agent):
-    # On ground, moving slowly, upright
-    if agent.me.airborne: return False
-    if agent.me.velocity.magnitude() > 1500: return False
-    if agent.me.up.z < 0.8: return False # Not upright enough
-    return True
-
 # --- NEW STRATEGIC ANALYSIS FUNCTIONS ---
 
 def intercept_time(car, ball_prediction):
     # Estimator for time to reach ball.
+    # Uses a simple physics model: distance / average_speed
+    # This is a heuristic and not as accurate as `find_hits` but faster for general logic.
     car_to_ball = (Vector3(ball_prediction.slices[0].physics.location) - car.location).magnitude()
     avg_speed = 1500 # Assume average game speed
     if car.boost > 50: avg_speed = 2000
