@@ -887,6 +887,14 @@ class collect_boost():
             if b.active:
                 dist = (b.location - agent.me.location).magnitude()
                 value = 100 if b.large else 12
+
+                # Heavily weight large boosts if we are low
+                if agent.me.boost < 15:
+                    if b.large:
+                        value = 300 # Massive value for large boost
+                    else:
+                        value = 1 # Ignore small pads basically
+
                 # heuristic: distance - value*10
                 score = dist - (value * 10)
                 if score < best_score:

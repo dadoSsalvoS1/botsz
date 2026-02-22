@@ -25,17 +25,14 @@ class ApexBot(GoslingAgent):
         situation = analyze_match_situation(self)
 
         # 2. Mechanics & Recovery
-        # Only do advanced movement mechanics if not in immediate critical danger or trying to shoot
-        if situation != 'defending' or not is_ball_threatening(self):
-            # If we are on the wall and moving slowly, chain wall dash to gain speed
-            if is_wall_dash_viable(self):
-                self.push(wall_dash())
-                return
+        # If we are on the wall and moving slowly, chain wall dash to gain speed
+        # Wall dash is situational but generally safe if on the wall
+        if is_wall_dash_viable(self):
+            self.push(wall_dash())
+            return
 
-            # If we are on the ground and moving slowly, chain wave dash to gain speed
-            if is_chain_wave_dash_viable(self):
-                self.push(chain_wave_dash())
-                return
+        # REMOVED GLOBAL CHAIN WAVE DASH SPAM
+        # Wave dashes should only happen if we have a target and are far away
 
         # 3. High Level Strategy "The Brain"
         if situation == 'attacking':
@@ -82,23 +79,58 @@ class ApexBot(GoslingAgent):
                 self.push(short_shot(ball_loc))
                 return
             else:
-                # Shadow Defense
-                # Position between ball and goal, but slightly back
-                goal_vec = self.friend_goal.location - ball_loc
-                target_distance = 1500
-                target = ball_loc + goal_vec.normalize() * target_distance
+                # Shadow Defense / Backpost Rotation
 
-                # Bounds check
-                if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
+                # If a teammate is closer than us, we should rotate to backpost
+                # Find teammate closest to ball
+                closest_teammate = None
+                closest_dist = 99999
+                for car in self.friends:
+                    d = (car.location - ball_loc).magnitude()
+                    if d < closest_dist:
+                        closest_dist = d
+                        closest_teammate = car
 
-                # If we are low on boost and far from play, maybe grab boost?
-                if self.me.boost < 30 and (ball_loc - self.me.location).magnitude() > 2500:
-                     self.push(collect_boost())
-                     return
+                am_i_closest = True
+                if closest_teammate and closest_dist < (self.me.location - ball_loc).magnitude():
+                    am_i_closest = False
 
-                # Urgent return to position
-                self.push(goto(target, urgent=True))
-                return
+                if not am_i_closest:
+                    # Rotate to Backpost
+                    # Backpost is the goal post furthest from the ball
+                    left_post_dist = (self.friend_goal.left_post - ball_loc).magnitude()
+                    right_post_dist = (self.friend_goal.right_post - ball_loc).magnitude()
+
+                    if left_post_dist > right_post_dist:
+                        target = self.friend_goal.left_post
+                    else:
+                        target = self.friend_goal.right_post
+
+                    # Move *inside* the goal slightly to face out
+                    # This is simple: just target the post for now, maybe offset slightly
+                    # Using goto with vector pointing OUT of goal (towards center field)
+                    center_field = Vector3(0, 0, 0)
+                    self.push(goto(target, vector=center_field - target))
+                    return
+                else:
+                    # We are the last line of defense (Shadow)
+                    # Position between ball and goal, but slightly back
+                    goal_vec = self.friend_goal.location - ball_loc
+                    target_distance = 1500
+                    target = ball_loc + goal_vec.normalize() * target_distance
+
+                    # Bounds check
+                    if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
+
+                    # If we are low on boost and far from play, maybe grab boost?
+                    # Only if ball is far away (> 3000) to avoid leaving net open
+                    if self.me.boost < 30 and (ball_loc - self.me.location).magnitude() > 3000:
+                         self.push(collect_boost())
+                         return
+
+                    # Urgent return to position
+                    self.push(goto(target, urgent=True))
+                    return
 
         else: # Neutral
             # 50/50 ball or loose ball far away
