@@ -68,11 +68,13 @@ class aerial_shot():
 
         # The adjustment causes the car to circle around the dodge point in an effort to line up with the shot vector
         # The adjustment slowly decreases to 0 as the bot nears the time to jump
+        # adjustment = car_to_intercept.angle(self.shot_vector) * distance_remaining / 1.57  # size of adjustment
         adjustment = angle_between(car_to_intercept, self.shot_vector) * distance_remaining / 1.57
 
         adjustment *= (cap(self.jump_threshold - (acceleration_required[2]), 0.0,
                            self.jump_threshold) / self.jump_threshold)  # factoring in how close to jump we are
         # we don't adjust the final target if we are already jumping
+        # final_target = self.intercept + ((car_to_intercept_perp.normalize() * adjustment) if self.jump_time == 0 else 0)
         norm_perp, _ = normalize(car_to_intercept_perp)
         final_target = self.intercept + ((norm_perp * adjustment) if self.jump_time == 0 else 0)
 
@@ -835,3 +837,27 @@ class aerial():
         enough_boost = boos_estimate < 0.95 * agent.me.boost
         enough_time = abs(ratio) < 0.9
         return magnitude(velocity_estimate) < 0.9 * max_speed and enough_boost and enough_time
+
+class air_dribble():
+    def __init__(self):
+        self.step = 0
+
+    def run(self, agent):
+        # Very simple conceptual air dribble
+        # 1. Pop ball up
+        # 2. Fly to ball
+        # 3. Carry
+
+        # For now, just a placeholder that pushes aerial() if ball is high
+        if agent.ball.location[2] > 500:
+             # Basic aerial logic
+             agent.push(aerial(agent.ball.location, agent.time + 1.0, not agent.me.airborne))
+        else:
+             agent.pop()
+
+class wall_shot():
+    def __init__(self):
+        pass
+    def run(self, agent):
+        # Placeholder for wall shot
+        agent.pop()
