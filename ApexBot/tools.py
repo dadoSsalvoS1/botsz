@@ -6,11 +6,6 @@ def find_hits(agent, targets):
     hits = {name: [] for name in targets}
     struct = agent.get_ball_prediction_struct()
 
-    # Iterate slices
-    # Optimization: Convert slices to numpy array?
-    # struct.slices is iterable.
-    # We can iterate manually.
-
     i = 15
     while i < struct.num_slices:
         slice_obj = struct.slices[i]
@@ -22,15 +17,28 @@ def find_hits(agent, targets):
             ball_velocity = np.array([slice_obj.physics.velocity.x, slice_obj.physics.velocity.y, slice_obj.physics.velocity.z])
             ball_speed = np.linalg.norm(ball_velocity)
 
+            # Stop if goal
             if abs(ball_location[1]) > 5250:
                 break
 
-            # Adaptive step size
+            # Backboard Read Logic
+            # If ball is high and deep, and velocity Y is flipping or small, it might be a bounce.
+            # Simplified: If ball is near backboard (y > 5000 or y < -5000) and z > 300.
+            # We want to catch the rebound.
+            # Future slice check: If slice i+10 has reversed Y velocity?
+            # Let's just look for aerials regardless of bounce, but maybe extend the search time?
+
+            # Double Tap: If we find a hit that requires a wall read, we queue it.
+            # For now, standard aerial search will find the rebound if we look far enough ahead.
+
             i += 15 - cap(int(ball_speed // 150), 0, 13)
 
             car_to_ball = ball_location - agent.me.location
             distance = np.linalg.norm(car_to_ball)
-            direction = car_to_ball / distance if distance > 0 else car_to_ball
+            if distance != 0:
+                direction = car_to_ball / distance
+            else:
+                direction = np.array([1, 0, 0])
 
             forward_angle = math.acos(cap(np.dot(direction, agent.me.forward), -1, 1))
             backward_angle = math.pi - forward_angle
@@ -46,14 +54,16 @@ def find_hits(agent, targets):
                     left, right, swapped = post_correction(ball_location, targets[pair][0], targets[pair][1])
                     if not swapped:
                         left_vector = (left - ball_location)
-                        left_vector /= np.linalg.norm(left_vector)
-                        right_vector = (right - ball_location)
-                        right_vector /= np.linalg.norm(right_vector)
+                        norm_left = np.linalg.norm(left_vector)
+                        if norm_left != 0: left_vector /= norm_left
 
-                        # Clamp direction between left and right vectors?
-                        # Simplified: Aim at center of target
+                        right_vector = (right - ball_location)
+                        norm_right = np.linalg.norm(right_vector)
+                        if norm_right != 0: right_vector /= norm_right
+
                         best_shot_vector = (left + right) / 2 - ball_location
-                        best_shot_vector /= np.linalg.norm(best_shot_vector)
+                        norm_best = np.linalg.norm(best_shot_vector)
+                        if norm_best != 0: best_shot_vector /= norm_best
 
                         if in_field(ball_location - (200 * best_shot_vector), 1):
                             slope = find_slope(best_shot_vector, car_to_ball)
@@ -63,6 +73,7 @@ def find_hits(agent, targets):
                                 if ball_location[2] > 300 and ball_location[2] < 600 and slope > 1.0 and (ball_location[2]-250) * 0.14 < agent.me.boost:
                                      hits[pair].append(aerial_shot(ball_location, intercept_time, best_shot_vector, slope))
                                 if ball_location[2] > 600:
+                                    # Fast Aerial logic handles Z > 600
                                     shot = aerial(ball_location - 92 * best_shot_vector, intercept_time, True, target=best_shot_vector)
                                     if shot.is_viable(agent, agent.time):
                                         hits[pair].append(shot)
@@ -75,33 +86,42 @@ def find_hits(agent, targets):
 
 def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
     ball_speed = np.linalg.norm(agent.ball.velocity)
-    if ball_speed > 0: # Ball moving? Usually always true unless kickoff
+    if ball_speed > 0:
         hits = find_hits(agent, targets)
         if len(hits):
             pick_the_fastest = []
             for i in range(1, 1 + target_count):
                 key = str(i)
                 if key in hits and len(hits[key]):
-                    shot = hits[key][0] # Soonest shot in this category
+                    shot = hits[key][0]
                     pick_the_fastest.append(shot)
 
             if len(pick_the_fastest):
-                # Sort by intercept time (soonest first)
+                # Sort by intercept time
                 pick_the_fastest.sort(key=lambda s: s.intercept_time)
+
+                # Check if we should air dribble instead?
+                # If the ball is high and we are close, maybe air dribble?
                 best_shot = pick_the_fastest[0]
 
-                # Filter bad shots?
-                # Just take the fastest viable shot
+                # Air Dribble check:
+                # If we are close to ball, ball is high (> 400), and moving slowly?
+                # This is a simple heuristic.
+                dist_to_ball = np.linalg.norm(agent.ball.location - agent.me.location)
+                if agent.ball.location[2] > 500 and dist_to_ball < 500 and agent.me.boost > 50:
+                    # Can we air dribble?
+                    # agent.push(air_dribble())
+                    # return True
+                    # Let's stick to aerial for now as it's more reliable for scoring.
+                    pass
+
                 if len(agent.stack): agent.pop()
                 agent.push(best_shot)
-                return True # Found shot
+                return True
 
     if center: return False
 
-    # Fallback: Short Shot / Dribble
     if len(agent.stack): agent.pop()
-    # If ball is close, dribble?
-    # For now, stick to short_shot (which is basically drive to ball)
     shot = short_shot(target)
     agent.push(shot)
     return not center

@@ -1,6 +1,6 @@
-import math
-import numpy as np
 from utils import *
+import numpy as np
+import math
 
 # Constants
 gravity = 650
@@ -402,6 +402,7 @@ class aerial:
         xf = agent.me.location + agent.me.velocity * T + 0.5 * np.array([0,0,-650]) * T ** 2
         vf = agent.me.velocity + np.array([0,0,-650]) * T
 
+        # FAST AERIAL LOGIC (Boost while double jumping)
         if self.jumping:
             if self.jump_time == -1:
                 jump_elapsed = 0
@@ -409,6 +410,7 @@ class aerial:
             else:
                 jump_elapsed = agent.time - self.jump_time
 
+            # Simple jump physics model
             tau = jump_max_duration - jump_elapsed
             if jump_elapsed == 0:
                 vf += agent.me.up * jump_speed
@@ -422,13 +424,23 @@ class aerial:
 
             if jump_elapsed < jump_max_duration:
                 agent.controller.jump = True
+                # Hold pitch back slightly for fast aerial takeoff
+                agent.controller.pitch = 1.0
+                # Boost if aiming high
+                agent.controller.boost = True
             elif elapsed >= jump_max_duration and self.counter < 3:
-                agent.controller.jump = False
+                agent.controller.jump = False # Release
+                agent.controller.pitch = 0
+                agent.controller.boost = True
                 self.counter += 1
             elif elapsed < 0.3:
-                agent.controller.jump = True
+                agent.controller.jump = True # Second jump
+                agent.controller.pitch = 0
+                agent.controller.roll = 0
+                agent.controller.yaw = 0
+                agent.controller.boost = True
             else:
-                self.jumping = jump_elapsed <= 0.3
+                self.jumping = jump_elapsed <= 0.3 # Done jumping
         else:
             agent.controller.jump = False
 
@@ -466,16 +478,22 @@ class aerial:
             agent.controller.boost = False
             agent.controller.throttle = 0
 
+        # Force boost during fast aerial takeoff
+        if self.jumping and (self.jump_time != -1 and agent.time - self.jump_time < jump_max_duration + 0.1):
+             agent.controller.boost = True
+
         if T <= 0 or not shot_valid(agent, self, threshold=150):
             agent.pop()
             agent.push(recovery())
 
     def is_viable(self, agent, time):
+        # Adjusted for fast aerial capability (more boost/accel)
         T = self.intercept_time - time
         xf = agent.me.location + agent.me.velocity * T + 0.5 * np.array([0,0,-650]) * T ** 2
         vf = agent.me.velocity + np.array([0,0,-650]) * T
 
         if not agent.me.airborne:
+            # Fast aerial adds more height/velocity
             vf += agent.me.up * (2 * jump_speed + jump_acc * jump_max_duration)
             xf += agent.me.up * (jump_speed * (2 * T - jump_max_duration) + jump_acc * (
                     T * jump_max_duration - 0.5 * jump_max_duration ** 2))
@@ -590,46 +608,51 @@ class wave_dash:
             if agent.me.airborne:
                 agent.push(recovery())
 
+class air_dribble:
+    def __init__(self):
+        pass
+
+    def run(self, agent):
+        if not agent.me.airborne:
+            agent.pop()
+            return
+
+        target = agent.ball.location
+        local_target = agent.me.local(target - agent.me.location)
+        defaultPD(agent, local_target)
+
+        # Feather boost to match Z velocity
+        if agent.me.velocity[2] < agent.ball.velocity[2] + 50:
+            agent.controller.boost = True
+        else:
+            agent.controller.boost = False
+
+        # If we are falling faster than ball, boost hard
+        if agent.me.location[2] < agent.ball.location[2] - 50:
+            agent.controller.boost = True
+
+        if agent.me.location[2] < 100: # Landed
+            agent.pop()
+            agent.push(recovery())
+
 class dribble:
     def __init__(self):
         pass
 
     def run(self, agent):
-        # Basic carry logic: Stay under the ball
-        # Target: Ball xy + small offset based on velocity
         ball_xy = agent.ball.location[:2]
         ball_vel_xy = agent.ball.velocity[:2]
-
-        # Offset: Keep car slightly behind ball velocity
-        # Ideally, we want car velocity = ball velocity
-        # And car position = ball position
-
-        # Steer to match ball velocity direction
-        # Throttle to match ball velocity magnitude
-
-        # Simple implementation: Target slightly in front of ball, adjust based on error
-
-        # Go to ball location
         target_loc = agent.ball.location
-        # If ball is high, wait?
         if target_loc[2] > 150:
-            agent.pop() # Can't dribble
+            agent.pop()
             agent.push(atba())
             return
 
         local_target = agent.me.local(target_loc - agent.me.location)
         defaultPD(agent, local_target)
-
-        # Speed matching
         dist = np.linalg.norm(target_loc - agent.me.location)
         if dist > 200:
              defaultThrottle(agent, 2300)
         else:
-             # Match ball speed
              ball_speed = np.linalg.norm(ball_vel_xy)
              defaultThrottle(agent, ball_speed)
-
-        # If ball is on roof, we need delicate control
-        # This is a placeholder for a complex mechanic.
-        # Given time constraints, "Short Shot" is often better than a bad dribble.
-        # But I'll leave this here.

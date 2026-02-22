@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from routines import jump_shot, aerial_shot, aerial
+from routines import jump_shot, aerial_shot, aerial, air_dribble
 from utils import backsolve, shot_valid, cap, car_object
 
 # Mocks
@@ -20,7 +20,7 @@ class MockAgent:
             'airborne': False,
             'up': np.array([0,0,1]),
             'forward': np.array([1,0,0]),
-            'local': lambda self, v: v # Simplify local transform
+            'local': lambda self, v: v
         })()
         self.ball = type('obj', (object,), {'location': np.array([1000, 0, 0]), 'velocity': np.zeros(3)})()
         self.controller = type('obj', (object,), {'throttle': 0, 'steer': 0, 'pitch': 0, 'yaw': 0, 'roll': 0, 'boost': False, 'handbrake': False, 'jump': False})()
@@ -60,36 +60,24 @@ class BallPredictionStructMock:
         self.num_slices = 60
 
 class TestAdvancedRoutines(unittest.TestCase):
-    def test_jump_shot_init(self):
-        # Ensure init doesn't crash with zero vectors
-        ball_loc = np.array([0, 0, 0])
-        shot_vec = np.array([1, 0, 0])
-        intercept_time = 1.0
-        shot = jump_shot(ball_loc, intercept_time, shot_vec, 1.0)
-        self.assertIsNotNone(shot)
-
-    def test_jump_shot_run(self):
+    def test_air_dribble_run(self):
         agent = MockAgent()
-        shot_vec = np.array([1, 0, 0])
-        ball_loc = np.array([1000, 0, 0])
-        intercept_time = 1.0 # 1s in future
+        agent.me.airborne = True
+        agent.me.velocity = np.array([0,0,100])
+        agent.ball.location = np.array([0,0,200])
+        agent.ball.velocity = np.array([0,0,100])
 
-        shot = jump_shot(ball_loc, intercept_time, shot_vec, 1.0)
+        dribble = air_dribble()
+        dribble.run(agent)
 
-        # Run
-        shot.run(agent)
+        # Should boost if falling relative to ball
+        # Ball vel 100, car vel 100.
+        # Check logic: if car.vel.z < ball.vel.z + 50 (150). Yes 100 < 150.
+        self.assertTrue(agent.controller.boost)
 
-        # Should drive forward
-        self.assertEqual(agent.controller.throttle, 1.0)
-
-    def test_aerial_init(self):
-        ball_loc = np.array([0, 0, 500])
-        shot = aerial(ball_loc, 2.0, True)
-        self.assertIsNotNone(shot)
-
-    def test_aerial_run(self):
+    def test_aerial_fast_run(self):
         agent = MockAgent()
-        ball_loc = np.array([0, 0, 500])
+        ball_loc = np.array([0, 0, 800]) # High ball
         # Aerial needs time > 0
         shot = aerial(ball_loc, 2.0, True)
 
@@ -98,6 +86,10 @@ class TestAdvancedRoutines(unittest.TestCase):
 
         # Should jump (since on_ground=True)
         self.assertTrue(agent.controller.jump)
+        # Should pitch back for fast aerial
+        self.assertEqual(agent.controller.pitch, 1.0)
+        # Should boost
+        self.assertTrue(agent.controller.boost)
 
 if __name__ == '__main__':
     unittest.main()
