@@ -46,8 +46,11 @@ class ApexBot(GoslingAgent):
 
             if not found_shot and len(self.stack) == 0:
                 # Fallback: Drive to ball (short_shot handles basic approach)
-                # determine_shot pushes short_shot if generic driving is needed, but just in case
-                self.push(short_shot(self.foe_goal.location))
+                # check if ball near wall?
+                if abs(self.ball.location[0]) > 3800 or abs(self.ball.location[1]) > 4800:
+                    self.push(wall_shot(self.foe_goal.location))
+                else:
+                    self.push(short_shot(self.foe_goal.location))
 
         else:
             # DEFENSE / SUPPORT
@@ -58,12 +61,33 @@ class ApexBot(GoslingAgent):
             goal_to_ball = ball_loc - goal_loc
             dist_to_ball = np.linalg.norm(goal_to_ball)
 
+            # Smart Boost Collection Logic
+            # Only if we need boost and ball is not immediately threatening
+            if self.me.boost < 50:
+                # Is ball far away? > 3000 units from goal?
+                # Or moving away?
+                ball_speed_towards_goal = np.dot(self.ball.velocity, (goal_loc - ball_loc)/dist_to_ball)
+                threat = dist_to_ball < 2000 or ball_speed_towards_goal > 1000
+
+                if not threat:
+                    closest_boost = None
+                    closest_dist = 99999
+                    for boost in self.boosts:
+                        if boost.active and boost.large:
+                            dist = np.linalg.norm(boost.location - self.me.location)
+                            if dist < closest_dist:
+                                closest_dist = dist
+                                closest_boost = boost
+
+                    if closest_boost and closest_dist < 2500:
+                        self.push(goto_boost(closest_boost, self.ball.location))
+                        return
+
             # Target position: Shadow Defense
             target_dist = 2000 # Default shadow distance
             if dist_to_ball < 2000: target_dist = dist_to_ball * 0.5
 
             # Calculate shadow target
-            # Normalize vector
             if dist_to_ball > 0:
                 dir_to_ball = goal_to_ball / dist_to_ball
                 shadow_target = ball_loc - dir_to_ball * target_dist
@@ -72,20 +96,5 @@ class ApexBot(GoslingAgent):
 
             if in_goal_area(self):
                  shadow_target = goal_loc + (ball_loc - goal_loc) * 0.1
-
-            # If we have low boost, look for boost
-            if self.me.boost < 30:
-                closest_boost = None
-                closest_dist = 99999
-                for boost in self.boosts:
-                    if boost.active and boost.large:
-                        dist = np.linalg.norm(boost.location - self.me.location)
-                        if dist < closest_dist:
-                            closest_dist = dist
-                            closest_boost = boost
-
-                if closest_boost and closest_dist < 3000:
-                    self.push(goto_boost(closest_boost, self.ball.location))
-                    return
 
             self.push(goto(shadow_target, self.ball.location))

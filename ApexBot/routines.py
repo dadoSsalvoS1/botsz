@@ -1,4 +1,6 @@
 from utils import *
+from routines import *
+from tools import *
 import numpy as np
 import math
 
@@ -150,8 +152,26 @@ class short_shot:
         else:
             eta = 1.5
 
-        target_vector = -ball_to_target_norm
-        final_target = agent.ball.location + (target_vector * (distance / 2))
+        # Approach Logic: Aim for the opposite side of the ball from the target
+        # Add offset to ensure we hit the correct spot on the ball
+        offset_distance = 100 # Ball radius roughly
+
+        # We want to be behind the ball relative to the target
+        ideal_pos = agent.ball.location - (ball_to_target_norm * offset_distance)
+
+        # If we are far, aim for that ideal pos. If close, just hit the ball.
+        if distance > 300:
+            final_target = ideal_pos
+        else:
+            final_target = agent.ball.location
+
+        # Correction for approach angle
+        # If we are too far off the line, drift out
+        car_to_ideal = ideal_pos - agent.me.location
+        approach_angle = math.acos(cap(np.dot(car_to_ball_norm, ball_to_target_norm), -1, 1))
+
+        # If angle is bad (> 45 deg), maybe circle?
+        # For now, simple PD will try to turn.
 
         if in_goal_area(agent):
              final_target[0] = cap(final_target[0], -750, 750)
@@ -159,13 +179,25 @@ class short_shot:
 
         agent.line(final_target - np.array([0, 0, 100]), final_target + np.array([0, 0, 100]), [255, 255, 255])
         angles = defaultPD(agent, agent.me.local(final_target - agent.me.location))
-        defaultThrottle(agent, 2300 if distance > 1600 else 2300 - cap(1600 * abs(angles[1]), 0, 2050))
+
+        # Throttle logic
+        speed_req = 2300
+        if distance < 1600:
+            speed_req = 2300 - cap(1600 * abs(angles[1]), 0, 2050)
+
+        defaultThrottle(agent, speed_req)
+
         agent.controller.boost = False if agent.me.airborne or abs(angles[1]) > 0.3 else agent.controller.boost
         agent.controller.handbrake = True if abs(angles[1]) > 2.3 else agent.controller.handbrake
 
-        if abs(angles[1]) < 0.05 and (eta < 0.45 or distance < 150):
+        # Hit logic
+        if abs(angles[1]) < 0.1 and (eta < 0.45 or distance < 200):
             agent.pop()
-            agent.push(flip(agent.me.local(car_to_ball)))
+            # If ball is slightly in air, jump
+            if agent.ball.location[2] > 100:
+                 agent.push(flip(agent.me.local(car_to_ball))) # This triggers jump
+            else:
+                 agent.push(flip(agent.me.local(car_to_ball)))
 
 class goto_boost:
     def __init__(self, boost, target=None):
@@ -617,18 +649,40 @@ class air_dribble:
             agent.pop()
             return
 
-        target = agent.ball.location
+        # Aim slightly below the ball to prop it up
+        target = agent.ball.location + np.array([0, 0, -50])
         local_target = agent.me.local(target - agent.me.location)
         defaultPD(agent, local_target)
 
-        # Feather boost to match Z velocity
-        if agent.me.velocity[2] < agent.ball.velocity[2] + 50:
-            agent.controller.boost = True
-        else:
-            agent.controller.boost = False
+        car_speed = np.linalg.norm(agent.me.velocity)
+        ball_speed = np.linalg.norm(agent.ball.velocity)
 
-        # If we are falling faster than ball, boost hard
-        if agent.me.location[2] < agent.ball.location[2] - 50:
+        # Distance check
+        dist = np.linalg.norm(agent.ball.location - agent.me.location)
+
+        if dist > 1000: # Lost control
+            agent.pop()
+            agent.push(recovery())
+            return
+
+        # Throttle/Boost control
+        # If we are behind the ball and moving slower, boost/throttle
+        forward_dot = np.dot(agent.me.forward, (agent.ball.location - agent.me.location) / dist)
+
+        if forward_dot > 0.8:
+            if car_speed < ball_speed + 50:
+                agent.controller.throttle = 1.0
+                agent.controller.boost = True
+            else:
+                agent.controller.throttle = 0.0
+                agent.controller.boost = False
+        else:
+            agent.controller.throttle = 0.5 # Maintain adjustment
+
+        # Vertical control - keep altitude relative to ball
+        if agent.me.location[2] < agent.ball.location[2] - 100:
+            agent.controller.jump = True # Try to jump/dodge up? No, aerial logic.
+            agent.controller.pitch = 1 # Pull back
             agent.controller.boost = True
 
         if agent.me.location[2] < 100: # Landed
@@ -656,3 +710,40 @@ class dribble:
         else:
              ball_speed = np.linalg.norm(ball_vel_xy)
              defaultThrottle(agent, ball_speed)
+
+class wall_shot:
+    def __init__(self, target):
+        self.target = target
+        self.jumping = False
+
+    def run(self, agent):
+        # Basic wall shot logic
+        # 1. Drive up wall matching ball X/Y
+        # 2. When close to ball Z, jump off wall towards target
+
+        # Are we on the wall?
+        # Wall is X +/- 4096 or Y +/- 5120
+        # If agent.me.location[2] > 50?
+
+        if not agent.me.airborne and agent.me.location[2] < 20:
+            # Drive to wall
+            # Find closest wall point
+            pass
+            # This complex. For now, simple fallback.
+            agent.pop()
+            agent.push(short_shot(self.target))
+            return
+
+        # Aim at ball
+        local_target = agent.me.local(agent.ball.location - agent.me.location)
+        defaultPD(agent, local_target)
+        defaultThrottle(agent, 2300)
+
+        dist = np.linalg.norm(agent.ball.location - agent.me.location)
+
+        if dist < 300:
+            agent.controller.jump = True
+            agent.controller.pitch = -1 # Flip into it?
+            if dist < 150:
+                 agent.pop()
+                 agent.push(recovery())

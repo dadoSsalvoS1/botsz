@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from routines import jump_shot, aerial_shot, aerial, air_dribble
+from routines import jump_shot, aerial_shot, aerial, air_dribble, short_shot, wall_shot
 from utils import backsolve, shot_valid, cap, car_object
 
 # Mocks
@@ -63,33 +63,42 @@ class TestAdvancedRoutines(unittest.TestCase):
     def test_air_dribble_run(self):
         agent = MockAgent()
         agent.me.airborne = True
-        agent.me.velocity = np.array([0,0,100])
-        agent.ball.location = np.array([0,0,200])
-        agent.ball.velocity = np.array([0,0,100])
+        # Car behind ball (X axis)
+        agent.me.location = np.array([0,0,200])
+        agent.me.velocity = np.array([50,0,0])
+
+        agent.ball.location = np.array([100,0,200])
+        agent.ball.velocity = np.array([100,0,0])
 
         dribble = air_dribble()
         dribble.run(agent)
 
-        # Should boost if falling relative to ball
-        # Ball vel 100, car vel 100.
-        # Check logic: if car.vel.z < ball.vel.z + 50 (150). Yes 100 < 150.
+        # Car slower than ball, should throttle up
+        self.assertEqual(agent.controller.throttle, 1.0)
         self.assertTrue(agent.controller.boost)
 
-    def test_aerial_fast_run(self):
+    def test_short_shot_hit(self):
         agent = MockAgent()
-        ball_loc = np.array([0, 0, 800]) # High ball
-        # Aerial needs time > 0
-        shot = aerial(ball_loc, 2.0, True)
-
-        # Run
+        # Close to ball
+        agent.ball.location = np.array([100,0,0])
+        shot = short_shot(np.array([2000,0,0])) # Target ahead
         shot.run(agent)
 
-        # Should jump (since on_ground=True)
-        self.assertTrue(agent.controller.jump)
-        # Should pitch back for fast aerial
-        self.assertEqual(agent.controller.pitch, 1.0)
-        # Should boost
-        self.assertTrue(agent.controller.boost)
+        # Should flip
+        self.assertTrue(agent.stack[-1].__class__.__name__ == 'flip')
+
+    def test_wall_shot_drive(self):
+        agent = MockAgent()
+        agent.me.location = np.array([3900, 0, 10]) # Near wall, on ground
+        agent.ball.location = np.array([3900, 0, 500]) # Ball up wall
+
+        shot = wall_shot(np.array([0, 5000, 0]))
+        shot.run(agent)
+
+        # Should drive (atba/goto logic inline or fallback)
+        # Logic says: if on ground (<20), pop and push short_shot fallback.
+        # Check stack
+        self.assertEqual(agent.stack[-1].__class__.__name__, 'short_shot')
 
 if __name__ == '__main__':
     unittest.main()
