@@ -85,11 +85,6 @@ def find_hits(agent,targets):
 
 
 def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
-    # Check for Air Dribble opportunity first
-    if is_air_dribble_viable(agent):
-        agent.push(air_dribble())
-        return True
-
     if agent.ball.velocity.magnitude() > 0:
         hits = find_hits(agent, targets)
         if len(hits):
@@ -170,3 +165,57 @@ def is_chain_wave_dash_viable(agent):
     if agent.me.velocity.magnitude() > 1500: return False
     if agent.me.up.z < 0.8: return False # Not upright enough
     return True
+
+# --- NEW STRATEGIC ANALYSIS FUNCTIONS ---
+
+def intercept_time(car, ball_prediction):
+    # Estimator for time to reach ball.
+    # Uses a simple physics model: distance / average_speed
+    # This is a heuristic and not as accurate as `find_hits` but faster for general logic.
+    car_to_ball = (Vector3(ball_prediction.slices[0].physics.location) - car.location).magnitude()
+    avg_speed = 1500 # Assume average game speed
+    if car.boost > 50: avg_speed = 2000
+
+    return car_to_ball / avg_speed
+
+def analyze_match_situation(agent):
+    # High-level state classification
+
+    ball_loc = agent.ball.location
+    my_loc = agent.me.location
+
+    # Check possession/pressure
+    # Are we closer than the closest enemy?
+    closest_foe = None
+    closest_foe_dist = 99999
+    for foe in agent.foes:
+        dist = (foe.location - ball_loc).magnitude()
+        if dist < closest_foe_dist:
+            closest_foe_dist = dist
+            closest_foe = foe
+
+    my_dist = (my_loc - ball_loc).magnitude()
+
+    if my_dist < closest_foe_dist - 200:
+        return 'attacking'
+    elif my_dist > closest_foe_dist + 200:
+        return 'defending'
+    else:
+        return 'neutral' # 50/50 territory
+
+def is_ball_threatening(agent):
+    # Is the ball moving towards our goal?
+    ball_vel = agent.ball.velocity
+    ball_loc = agent.ball.location
+    goal_loc = agent.friend_goal.location
+
+    # Vector from ball to goal
+    to_goal = goal_loc - ball_loc
+
+    # Angle between velocity and direction to goal
+    angle = ball_vel.angle(to_goal)
+
+    # If angle is small (moving towards goal) and speed is decent
+    if angle < 1.0 and ball_vel.magnitude() > 500:
+        return True
+    return False

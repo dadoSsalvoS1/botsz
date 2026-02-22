@@ -7,6 +7,10 @@ class ApexBot(GoslingAgent):
         # Debug drawing
         self.renderer.draw_string_3d(self.me.location, 2, 2, f"Speed: {round(self.me.velocity.magnitude(), 1)}", self.renderer.white())
 
+        # State Debug
+        situation = analyze_match_situation(self)
+        self.renderer.draw_string_2d(20, 200, 2, 2, f"State: {situation}", self.renderer.yellow())
+
         # If no routine is active, decide on the next one
         if len(self.stack) < 1:
             self.handle_strategy()
@@ -28,47 +32,86 @@ class ApexBot(GoslingAgent):
             self.push(chain_wave_dash())
             return
 
+        # 3. High Level Strategy "The Brain"
+        situation = analyze_match_situation(self)
         ball_loc = self.ball.location
 
-        # 3. Role Assignment: Are we the closest teammate to the ball?
-        # Include ourselves in the list
-        all_cars = self.friends + [self.me]
-        # Find car with minimum distance to ball
-        closest_car = min(all_cars, key=lambda car: (car.location - ball_loc).magnitude())
+        if situation == 'attacking':
+            # We have possession or are closest.
+            # Tactics: Shoot, Dribble, Air Dribble
 
-        is_closest = (closest_car.index == self.index)
-
-        # 4. Execution
-        if is_closest:
-            # ATTACK MODE
             # Define target regions (Goal)
             targets = {
                 "1": (self.foe_goal.left_post, self.foe_goal.right_post)
             }
-            # Try to find a shot (Aerial, Jump, or Ground)
-            # determine_shot will push the best shot routine, or a short_shot (dribble) if no shot is found.
-            # determine_shot now also checks for air_dribble opportunities
-            determine_shot(self, self.foe_goal.location, targets, len(targets))
-        else:
-            # DEFENSE / SUPPORT MODE (Shadow Defense)
 
-            # If we are low on boost and not in immediate danger, collect boost
-            if self.me.boost < 20 and (ball_loc - self.me.location).magnitude() > 2000:
+            # Check for air dribble first (Flashy & Effective if space allows)
+            if is_air_dribble_viable(self):
+                self.push(air_dribble())
+                return
+
+            # Try to find a shot (Aerial, Jump, or Ground)
+            # determine_shot pushes the routine if found.
+            # If defensive=False, it prioritizes speed/power.
+            if determine_shot(self, self.foe_goal.location, targets, len(targets), defensive=False):
+                return
+
+            # If no shot found, Dribble (Short Shot to goal)
+            if len(self.stack) == 0:
+                self.push(short_shot(self.foe_goal.location))
+                return
+
+        elif situation == 'defending':
+            # Enemy has possession or is closer.
+            # Tactics: Emergency Save, Shadow Defense, Boost Steal (if safe)
+
+            if is_ball_threatening(self):
+                # EMERGENCY: Clear the ball anywhere safe
+                # Create wide targets away from our net
+                # Using opponent goal as a generic "away" direction for now, or corners
+                # Ideally we want to clear to corners, but for now let's just HIT IT.
+                targets = {
+                    "1": (self.foe_goal.left_post, self.foe_goal.right_post) # Try to clear towards enemy goal
+                }
+                if determine_shot(self, self.foe_goal.location, targets, len(targets), defensive=True):
+                   return
+
+                # If we can't find a smart shot/clear, just drive at the ball to block
+                self.push(short_shot(ball_loc))
+                return
+            else:
+                # Shadow Defense
+                # Position between ball and goal, but slightly back
+                goal_vec = self.friend_goal.location - ball_loc
+                target_distance = 1500
+                target = ball_loc + goal_vec.normalize() * target_distance
+
+                # Bounds check
+                if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
+
+                # If we are low on boost and far from play, maybe grab boost?
+                if self.me.boost < 30 and (ball_loc - self.me.location).magnitude() > 2500:
+                     self.push(collect_boost())
+                     return
+
+                self.push(goto(target))
+                return
+
+        else: # Neutral
+            # 50/50 ball or loose ball far away
+
+            # If low boost, prioritise collecting it before engaging
+            if self.me.boost < 30:
                 self.push(collect_boost())
                 return
 
-            # Position ourselves between the ball and our goal, acting as a last line of defense
-            goal_vec = self.friend_goal.location - ball_loc
+            # Otherwise, go for the ball (challenge)
+            targets = {
+                "1": (self.foe_goal.left_post, self.foe_goal.right_post)
+            }
+            if determine_shot(self, self.foe_goal.location, targets, len(targets), defensive=False):
+                return
 
-            # Target a point 1500 units from the ball towards our goal
-            target_distance = 1500
-            target = ball_loc + goal_vec.normalize() * target_distance
-
-            # Ensure the target is on our side of the ball relative to the goal (don't go past the ball)
-            # Actually, the vector math above ensures we are on the goal side of the ball.
-
-            # Simple bounds checking to stay in field
-            if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
-
-            # Go to the defensive position
-            self.push(goto(target))
+            # If can't shoot, approach
+            self.push(short_shot(ball_loc))
+            return
