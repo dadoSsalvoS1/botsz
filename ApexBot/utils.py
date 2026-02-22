@@ -332,7 +332,7 @@ def cap(x, low, high):
 def defaultPD(agent, local_target, direction = 1.0):
     # points the car towards a given local target.
     # Direction can be changed to allow the car to steer towards a target while driving backwards
-    local_target *= direction
+    local_target = local_target * direction
     up = agent.me.local(np.array([0, 0, 1]))  # where "up" is in local coordinates
     target_angles = [
         math.atan2(local_target[2], local_target[0]),  # angle required to pitch towards target

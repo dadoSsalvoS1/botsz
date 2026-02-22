@@ -28,7 +28,6 @@ class atba():
         defaultPD(agent, local_target)
         defaultThrottle(agent, 2300)
 
-
 class aerial_shot():
     # Very similar to jump_shot(), but instead designed to hit targets above 300uu
     # ***This routine is a WIP*** It does not currently hit the ball very hard, nor does it like to be accurate above 600uu or so
@@ -235,7 +234,7 @@ class goto():
 class goto_boost():
     # very similar to goto() but designed for grabbing boost
     # if a target is provided the bot will try to be facing the target as it passes over the boost
-    # UPDATED: Now uses aggressive speedflips
+    # UPDATED: Now uses aggressive speedflips (from Botimus inspiration)
     def __init__(self, boost, target=None):
         self.boost = boost
         self.target = target
@@ -613,9 +612,9 @@ class fake_challenge():
 class recovery():
     # Point towards our velocity vector and land upright, unless we aren't moving very fast
     # A vector can be provided to control where the car points when it lands
+    # UPDATED: Includes Wall Recovery Logic (inspired by Kamael)
     def __init__(self, target=None):
         self.target = target
-
 
     def run(self, agent):
         if self.target is not None:
@@ -623,11 +622,52 @@ class recovery():
         else:
             local_target = agent.me.local(flatten(agent.me.velocity))
 
-        defaultPD(agent, local_target)
+        # Default: Up is Z+
+        up = np.array([0, 0, 1])
+
+        # Wall Recovery Check
+        if agent.me.airborne:
+            loc = agent.me.location
+            # Check proximity to walls (Standard field: +/- 4096 X, +/- 5120 Y)
+            if loc[0] > 3900: # Right Wall
+                up = np.array([-1, 0, 0])
+            elif loc[0] < -3900: # Left Wall
+                up = np.array([1, 0, 0])
+            elif loc[1] > 5000: # Orange Backboard
+                up = np.array([0, -1, 0])
+            elif loc[1] < -5000: # Blue Backboard
+                up = np.array([0, 1, 0])
+
+        # Orient car
+        local_up = agent.me.local(up)
+
+        # Re-implement simple PD for arbitrary 'up'
+        # defaultPD assumes up is (0,0,1). We need custom logic or trick defaultPD?
+        # Simpler: Just steer towards velocity, but roll to match 'up'.
+
+        # Calculate angles relative to local 'up'
+        # Roll: angle between local Z and desired up
+        # We want our local Z (agent.me.up) to align with 'up' (world space)
+        # But 'defaultPD' uses fixed target logic.
+
+        # Let's modify defaultPD usage slightly or just control roll explicitly.
+        # Use defaultPD for pitch/yaw towards velocity, but override roll.
+
+        angles = defaultPD(agent, local_target)
+
+        # Override roll for wall landing
+        if magnitude(up - np.array([0,0,1])) > 0.1: # If wall landing
+             # Calculate roll needed
+             # Local 'up' vector in car coords
+             # We want car's UP (Z) to align with wall normal
+             # wall normal in local coords:
+             local_wall_normal = agent.me.local(up)
+             roll_angle = math.atan2(local_wall_normal[1], local_wall_normal[2])
+             agent.controller.roll = steerPD(roll_angle, agent.me.angular_velocity[0] / 2)
+
         agent.controller.throttle = 1
         if not agent.me.airborne:
             agent.pop()
-
 
 class short_shot():
     # This routine drives towards the ball and attempts to hit it towards a given target
@@ -788,15 +828,7 @@ class avoid_demo():
     def run(self, agent):
         botToTargetAngle = atan2(self.car.location[1] - agent.me.location[1],
                                  self.car.location[0] - agent.me.location[0])
-        # yaw2 = atan2(agent.me.orientation[1][0], agent.me.orientation[0][0])
-        # In Matrix3, orientation[1] is left, orientation[0] is forward?
-        # car_object.orientation is [forward, left, up] columns?
-        # car_object.__init__:
-        # forward = np.array([CP * CY, CP * SY, SP])
-        # self.orientation = np.column_stack((forward, left, up))
-        # So agent.me.orientation[:, 0] is forward.
-        # agent.me.forward is already defined as property.
-
+        # yaw2 = atan2(agent.me.forward[1], agent.me.forward[0])
         yaw2 = atan2(agent.me.forward[1], agent.me.forward[0])
 
         if botToTargetAngle + yaw2 < 0:
@@ -944,15 +976,7 @@ class air_dribble():
             if agent.me.airborne:
                 self.step = 2 # Already in air, go to carry
             elif dist_to_ball > 500:
-                # Drive to ball
                 agent.push(goto(ball_loc, urgent=True))
-                # Note: push adds to stack, pop removes current.
-                # Ideally we want to drive *then* check again.
-                # But pushing a routine puts it on TOP.
-                # So next tick, goto runs. When goto pops, we are back here?
-                # No, air_dribble.run is called every tick if it's the active routine.
-                # GoslingUtils style: routines don't persist state well if they push other routines.
-                # Instead, we should control the car directly.
                 agent.pop() # Remove goto if we pushed it
 
             # Simple approach logic: Drive under the ball
@@ -973,15 +997,12 @@ class air_dribble():
 
         # Step 2: Carry
         elif self.step == 2:
-            # Match ball velocity
             target = ball_loc + np.array([0, 0, -50]) # Aim slightly below ball
 
-            # Use aerial control logic (simplified from aerial class)
             delta_x = target - my_loc
             direction, _ = normalize(delta_x)
             defaultPD(agent, agent.me.local(delta_x))
 
-            # Feather boost if pointing at ball
             if angle3D(agent.me.forward, direction) < 0.5:
                 agent.controller.boost = True
             else:
@@ -1000,19 +1021,15 @@ class wall_shot():
 
         # Step 0: Drive up wall
         if self.step == 0:
-            # Check if on wall (up vector is not vertical)
             if agent.me.up[2] < 0.5:
-                # We are on wall
                 self.step = 1
             else:
-                # Drive to wall nearest ball
                 wall_target = np.array([3500 * sign(ball_loc[0]), ball_loc[1], 0])
                 defaultPD(agent, agent.me.local(wall_target - my_loc))
                 defaultThrottle(agent, 2300)
 
         # Step 1: Aim and Jump
         elif self.step == 1:
-            # Aim at ball
             defaultPD(agent, agent.me.local(ball_loc - my_loc))
             defaultThrottle(agent, 1400)
 
@@ -1023,6 +1040,60 @@ class wall_shot():
         # Step 2: Aerial to ball
         elif self.step == 2:
             agent.controller.jump = False
-            # Transition to aerial
             agent.pop()
             agent.push(aerial(ball_loc, agent.time + 0.5, False))
+
+class ground_dribble():
+    # Inspired by Bumblebee: Ground Control
+    def __init__(self):
+        pass
+
+    def run(self, agent):
+        ball_loc = agent.ball.location
+        my_loc = agent.me.location
+
+        # Aim to be slightly behind the ball to carry it
+        # Offset calculation based on velocity
+        target = ball_loc + agent.me.velocity * 0.05
+        local_target = agent.me.local(target - my_loc)
+
+        # PID for steering under ball
+        defaultPD(agent, local_target)
+
+        # Speed matching
+        ball_speed = magnitude(agent.ball.velocity)
+        defaultThrottle(agent, ball_speed + 50) # Slight push
+
+        # If ball falls off or gets too far, abort
+        if distance(my_loc, ball_loc) > 300 or ball_loc[2] > 150:
+            agent.pop()
+
+class flick():
+    # Basic Front/Side flick mechanic
+    def __init__(self):
+        self.step = 0
+        self.start_time = -1
+
+    def run(self, agent):
+        if self.start_time == -1:
+            self.start_time = agent.time
+        elapsed = agent.time - self.start_time
+
+        if self.step == 0:
+            # Jump
+            agent.controller.jump = True
+            if elapsed > 0.1:
+                self.step = 1
+                agent.controller.jump = False
+        elif self.step == 1:
+            # Tilt
+            agent.controller.pitch = -1
+            if elapsed > 0.2:
+                self.step = 2
+        elif self.step == 2:
+            # Dodge
+            agent.controller.jump = True
+            agent.controller.pitch = -1 # Front flip
+            if elapsed > 0.5:
+                agent.pop()
+                agent.push(recovery())

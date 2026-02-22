@@ -26,13 +26,14 @@ class Brain:
         hits = tools.find_hits(self.agent, targets)
         wall_hits = tools.find_wall_hits(self.agent, targets)
 
-        # --- Context Analysis ---
+        # --- Context Analysis (Hybrid Brain) ---
         my_eta, foe_eta = tools.intercept_race(self.agent)
-        advantage = my_eta < (foe_eta - 0.1)
+        advantage = my_eta < (foe_eta - 0.2) # Clear win
         contested = abs(my_eta - foe_eta) < 0.5
         disadvantage = my_eta > foe_eta
 
         threat_level = self.evaluate_threat()
+        dist_to_ball = distance(my_loc, ball_loc)
 
         # --- Utility Calculation ---
         best_action = None
@@ -61,48 +62,57 @@ class Brain:
             save_score = 100
             if save_score > highest_score:
                 highest_score = save_score
-                # Panic save: Go to goal line or intercept
-                # Better: Intercept between goal and ball
                 target = my_goal + (ball_loc - my_goal) * 0.3
                 best_action = routines.goto(target, urgent=True)
 
-        # 4. Evaluate Air Dribble
-        dist_to_ball = distance(my_loc, ball_loc)
-        if ball_loc[2] > 200 and self.agent.me.boost > 40:
+        # 4. Evaluate Dribble & Flick (Bumblebee Logic)
+        # Ground Control: If ball is low and we have space
+        if ball_loc[2] < 120 and dist_to_ball < 200 and advantage:
+             dribble_score = 80 # Prioritize possession
+
+             # If carrying but threatened -> Flick
+             # Simple heuristic: if we are already dribbling?
+             # Brain executes every tick, so we need to detect state or trust `routines` logic.
+             # If close to opponent goal or foe is close -> Flick
+             foe_dist = min([distance(f.location, my_loc) for f in self.agent.foes])
+             if foe_dist < 500 or distance(my_loc, foe_goal) < 1500:
+                 dribble_score = 85
+                 best_action = routines.flick()
+             else:
+                 best_action = routines.ground_dribble()
+
+             if dribble_score > highest_score:
+                 highest_score = dribble_score
+
+        # 5. Evaluate Air Dribble
+        if ball_loc[2] > 200 and self.agent.me.boost > 40 and advantage:
             dribble_score = 65
             if dist_to_ball < 1500: dribble_score += 15
-            if advantage: dribble_score += 20 # Only dribble if we have space
 
             if dribble_score > highest_score:
                 highest_score = dribble_score
                 best_action = routines.air_dribble()
 
-        # 5. Evaluate Dribble / Pop (Ground)
-        if ball_loc[2] < 100 and dist_to_ball < 300 and highest_score < 60:
-             dribble_score = 60
-             if advantage: dribble_score += 10
-
-             if dribble_score > highest_score:
-                 highest_score = dribble_score
-                 best_action = routines.air_dribble()
-
-        # 6. Evaluate Fake Challenge (Smart Defense)
-        if disadvantage and dist_to_ball < 2500 and threat_level < 80:
-             # We are beaten to ball, but close enough to annoy
-             fake_score = 70
-             if fake_score > highest_score:
-                 highest_score = fake_score
-                 best_action = routines.fake_challenge()
+        # 6. Evaluate Shadow Defense (Kamael/Cryo Patience)
+        # If disadvantaged, don't dive. Shadow.
+        if disadvantage and threat_level < 80:
+             shadow_score = 90
+             # Maintain position between ball and goal, matching lateral movement
+             # Calculate shadow target
+             ball_to_goal = normalize(my_goal - ball_loc)[0]
+             target = ball_loc + ball_to_goal * 1500 # Keep distance
+             # Offset to side to cover cutbacks?
+             # Simple shadow for now
+             if shadow_score > highest_score:
+                 highest_score = shadow_score
+                 best_action = routines.goto(target, urgent=True)
 
         # 7. Evaluate Demo Hunt (Aggression)
-        # Look for demo if: High boost, not last man back (1v1: always last man, so be careful), or rotating out
-        # In 1v1, demo only if ball is safe or on way to ball
         ball_safe = distance(ball_loc, my_goal) > 4000
         if self.agent.me.boost > 30 and (ball_safe or advantage):
             for foe in self.agent.foes:
                 if not foe.demolished:
                     d = distance(my_loc, foe.location)
-                    # Opportunistic demo
                     if d < 1500 and abs(angle_between(self.agent.me.forward, foe.location - my_loc)) < 0.5:
                         demo_score = 85
                         if demo_score > highest_score:
@@ -129,11 +139,10 @@ class Brain:
         if best_action:
             self.agent.push(best_action)
         else:
-            # Fallback: Shadow Defense
+            # Fallback
             defense_vec, _ = normalize(ball_loc - my_goal)
             shadow_target = ball_loc - defense_vec * 2000
 
-            # Rotate back post if ball is on side
             if abs(ball_loc[0]) > 2000:
                 shadow_target = my_goal + np.array([sign(ball_loc[0]) * -800, 0, 0])
 
