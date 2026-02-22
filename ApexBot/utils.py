@@ -213,7 +213,11 @@ class ball_object:
 class boost_object:
     def __init__(self, index, location, large):
         self.index = index
-        self.location = np.array([location.x, location.y, location.z])
+        # Fix: handle location being either struct with .x or array
+        if hasattr(location, 'x'):
+            self.location = np.array([location.x, location.y, location.z])
+        else:
+            self.location = np.array(location)
         self.active = True
         self.large = large
 
