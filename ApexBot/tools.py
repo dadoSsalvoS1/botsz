@@ -18,7 +18,11 @@ def find_hits(agent,targets):
             ball_velocity = np.linalg.norm(np.array([struct.slices[i].physics.velocity.x, struct.slices[i].physics.velocity.y, struct.slices[i].physics.velocity.z]))
 
             if abs(ball_location[1]) > 5250:
-                break
+                # If ball is deep in goal, stop.
+                # But allow for backboard bounces (which might briefly go past 5120? No, wall is 5120).
+                # If it's bouncing, prediction handles it. If it stays past 5250, it's a goal.
+                if not (abs(ball_location[0]) < 900 and ball_location[2] > 0): # Goal box
+                     break
 
             # More granular search for SSL precision
             i += 10 - cap(int(ball_velocity//150),0,8) # was 15, now 10 for finer steps
@@ -80,13 +84,61 @@ def find_wall_hits(agent, targets):
 
     return hits
 
-def determine_shot(agent, target, targets, target_count, defensive=False, center=False):
-    # Deprecated by strategy.py
-    pass
+def intercept_race(agent):
+    # Calculate ETA for me and closest opponent
+    struct = agent.get_ball_prediction_struct()
 
-def determine_follow_up_shot(agent, targets, target_count):
-    # Deprecated by strategy.py
-    pass
+    my_intercept_time = 99.0
+    foe_intercept_time = 99.0
+
+    # 1. My ETA (Using simple physics heuristic similar to find_hits logic, but faster scan)
+    # Actually, we can just use the results from find_hits if available, but for standalone check:
+    for i in range(0, struct.num_slices, 5): # Coarse scan
+        slice_time = struct.slices[i].game_seconds
+        dt = slice_time - agent.time
+        if dt <= 0: continue
+
+        ball_loc = np.array([struct.slices[i].physics.location.x, struct.slices[i].physics.location.y, struct.slices[i].physics.location.z])
+
+        # Simple reachability: distance / avg_speed
+        # Assume avg speed ~1500 for ground, slightly less for air
+        dist = distance(agent.me.location, ball_loc)
+
+        if ball_loc[2] > 300:
+             # Aerial time needed
+             if dist / 1000 < dt: # Very rough aerial speed
+                 my_intercept_time = dt
+                 break
+        else:
+             # Ground
+             if dist / 1400 < dt:
+                 my_intercept_time = dt
+                 break
+
+    # 2. Foe ETA
+    closest_foe_dist = 99999
+    closest_foe = None
+    for foe in agent.foes:
+        d = distance(foe.location, agent.ball.location)
+        if d < closest_foe_dist:
+            closest_foe_dist = d
+            closest_foe = foe
+
+    if closest_foe:
+        for i in range(0, struct.num_slices, 5):
+            slice_time = struct.slices[i].game_seconds
+            dt = slice_time - agent.time
+            if dt <= 0: continue
+
+            ball_loc = np.array([struct.slices[i].physics.location.x, struct.slices[i].physics.location.y, struct.slices[i].physics.location.z])
+            dist = distance(closest_foe.location, ball_loc)
+
+            # Opponent is assumed to be good
+            if dist / 1400 < dt:
+                foe_intercept_time = dt
+                break
+
+    return my_intercept_time, foe_intercept_time
 
 def should_aerial(agent, shot:routines.aerial):
     return True

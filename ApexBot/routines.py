@@ -235,6 +235,7 @@ class goto():
 class goto_boost():
     # very similar to goto() but designed for grabbing boost
     # if a target is provided the bot will try to be facing the target as it passes over the boost
+    # UPDATED: Now uses aggressive speedflips
     def __init__(self, boost, target=None):
         self.boost = boost
         self.target = target
@@ -297,6 +298,12 @@ class goto_boost():
             agent.pop()
         elif agent.me.airborne:
             agent.push(recovery(self.target))
+        elif abs(angles[1]) < 0.1 and velocity > 600:
+             # Aggressive flip usage
+             if distance_remaining > 1800 and not agent.me.airborne:
+                 agent.push(speed_flip(self.boost.location)) # Speedflip for long distance
+             elif distance_remaining > 600 and not agent.me.airborne:
+                 agent.push(flip(local_target)) # Normal flip for mid distance
         elif abs(angles[1]) < 0.05 and velocity > 600 and velocity < 2150 and (
                 distance_remaining / velocity > 2.0 or (adjustment < 90 and car_to_target / velocity > 2.0)):
             # to prevent oversteering
@@ -451,6 +458,9 @@ class speed_flip():
             if magnitude(agent.me.velocity) > 1050: # Trigger speed flip
                 self.phase = 1
                 self.jump_timer = agent.time
+            # Timeout safeguard
+            if elapsed > 2.0:
+                 agent.pop()
 
         # Phase 1: First Jump
         elif self.phase == 1:
@@ -493,9 +503,12 @@ class speed_flip():
                 # Continue rolling/yawing? Usually just hold pitch back
                 agent.controller.roll = 0
                 agent.controller.yaw = 0
+                agent.controller.handbrake = False
+                # Optionally air roll to land wheels down
             else:
                 agent.pop()
-                agent.push(recovery())
+                if agent.me.airborne:
+                    agent.push(recovery())
 
 
 class kickoff():
@@ -518,6 +531,84 @@ class kickoff():
             agent.pop()
             agent.push(flip(agent.me.local(agent.foe_goal.location - agent.me.location)))
 
+class speed_flip_kickoff():
+    # Dedicated kickoff routine
+    def __init__(self):
+        self.step = 0
+
+    def run(self, agent):
+        if self.step == 0:
+            agent.push(speed_flip(agent.ball.location))
+            self.step = 1
+        elif self.step == 1:
+            # wait for speed flip to pop
+            if not agent.me.airborne and distance(agent.me.location, agent.ball.location) < 800:
+                agent.pop()
+                agent.push(flip(agent.me.local(agent.ball.location - agent.me.location)))
+
+class demo_hunt():
+    def __init__(self, target_car):
+        self.target_car = target_car
+        self.start_time = -1
+
+    def run(self, agent):
+        if self.start_time == -1:
+            self.start_time = agent.time
+
+        elapsed = agent.time - self.start_time
+
+        # Predict target location
+        target_loc = self.target_car.location + self.target_car.velocity * 0.5
+        local_target = agent.me.local(target_loc - agent.me.location)
+        dist = magnitude(target_loc - agent.me.location)
+
+        defaultPD(agent, local_target)
+        defaultThrottle(agent, 2300)
+
+        # Use speed flip if far
+        if dist > 2000 and abs(atan2(local_target[1], local_target[0])) < 0.1:
+            agent.push(speed_flip(target_loc))
+            return
+
+        # Abort if taking too long or target demolished
+        if elapsed > 3.0 or self.target_car.demolished:
+            agent.pop()
+
+        if dist < 300:
+            agent.pop() # Hit?
+
+class fake_challenge():
+    def __init__(self):
+        self.step = 0
+        self.start_time = -1
+
+    def run(self, agent):
+        if self.start_time == -1:
+            self.start_time = agent.time
+
+        elapsed = agent.time - self.start_time
+        ball_loc = agent.ball.location
+
+        if self.step == 0:
+            # Drive aggressively at ball
+            defaultPD(agent, agent.me.local(ball_loc - agent.me.location))
+            defaultThrottle(agent, 2300)
+
+            if elapsed > 0.5 or distance(agent.me.location, ball_loc) < 1000:
+                self.step = 1
+
+        elif self.step == 1:
+            # Brake and turn away
+            agent.controller.throttle = -1
+            agent.controller.handbrake = True
+
+            # Turn towards own goal/side
+            turn_target = agent.friend_goal.location
+            defaultPD(agent, agent.me.local(turn_target - agent.me.location))
+
+            if elapsed > 1.0:
+                agent.pop()
+                agent.push(recovery())
 
 class recovery():
     # Point towards our velocity vector and land upright, unless we aren't moving very fast
