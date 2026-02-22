@@ -2,15 +2,23 @@ from utils import *
 from routines import *
 from tools import *
 import numpy as np
+import traceback
 
 class ApexBot(GoslingAgent):
     def run(self):
-        # Visualization
-        self.renderer.draw_string_3d(self.me.location, 2, 2, f"Speed: {round(np.linalg.norm(self.me.velocity), 1)}", self.renderer.white())
-        self.renderer.draw_string_3d(self.me.location + np.array([0,0,50]), 2, 2, f"Stack: {len(self.stack)}", self.renderer.white())
+        try:
+            # Visualization
+            speed = np.linalg.norm(self.me.velocity)
+            self.renderer.draw_string_3d(self.me.location, 2, 2, f"Speed: {round(speed, 1)}", self.renderer.white())
+            self.renderer.draw_string_3d(self.me.location + np.array([0,0,50]), 2, 2, f"Stack: {len(self.stack)}", self.renderer.white())
 
-        if len(self.stack) < 1:
-            self.handle_strategy()
+            if len(self.stack) < 1:
+                self.handle_strategy()
+        except Exception:
+            self.renderer.draw_string_2d(10, 10, 3, 3, f"CRASH: {traceback.format_exc().splitlines()[-1]}", self.renderer.red())
+            print(traceback.format_exc())
+            if len(self.stack) == 0:
+                self.push(recovery()) # Try to recover
 
     def handle_strategy(self):
         # 1. Kickoff
@@ -22,15 +30,12 @@ class ApexBot(GoslingAgent):
         # 2. Team Structure
         # Find closest teammate to ball
         all_cars = self.friends + [self.me]
-        # closest_car logic: ensure we handle empty friends list correctly (done by including self)
         closest_car = min(all_cars, key=lambda car: np.linalg.norm(car.location - self.ball.location))
         is_closest = (closest_car.index == self.index)
 
         # 3. Decision Logic
         if is_closest:
             # ATTACK
-            # Define goal target (Opponent Goal)
-            # Use numeric keys for priority in determine_shot
             targets = {
                 "1": (self.foe_goal.left_post, self.foe_goal.right_post),
                 "2": (self.foe_goal.left_post, self.foe_goal.right_post)
@@ -39,10 +44,10 @@ class ApexBot(GoslingAgent):
             # Search for shots
             found_shot = determine_shot(self, self.foe_goal.location, targets, len(targets))
 
-            if not found_shot:
-                # Fallback to dribble (short_shot logic handles generic driving, but we can be explicit)
-                # determine_shot pushes short_shot if no aerial/jump shot found.
-                pass
+            if not found_shot and len(self.stack) == 0:
+                # Fallback: Drive to ball (short_shot handles basic approach)
+                # determine_shot pushes short_shot if generic driving is needed, but just in case
+                self.push(short_shot(self.foe_goal.location))
 
         else:
             # DEFENSE / SUPPORT
@@ -65,8 +70,6 @@ class ApexBot(GoslingAgent):
             else:
                 shadow_target = goal_loc
 
-            # Cap target inside field logic is handled by goto/routines usually, but let's be safe
-            # If we are in net, move out slightly
             if in_goal_area(self):
                  shadow_target = goal_loc + (ball_loc - goal_loc) * 0.1
 
