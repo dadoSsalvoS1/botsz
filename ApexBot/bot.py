@@ -32,7 +32,7 @@ class ApexBot(GoslingAgent):
             # ATTACK MODE
             # Define target regions (Goal)
             targets = {
-                "goal": (self.foe_goal.left_post, self.foe_goal.right_post)
+                "1": (self.foe_goal.left_post, self.foe_goal.right_post)
             }
             # Try to find a shot (Aerial, Jump, or Ground)
             # determine_shot will push the best shot routine, or a short_shot (dribble) if no shot is found.
