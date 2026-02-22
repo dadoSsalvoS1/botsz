@@ -20,9 +20,7 @@ def find_hits(agent,targets):
         intercept_time = struct.slices[i].game_seconds
         time_remaining = intercept_time - agent.time
         if time_remaining > 0:
-            # ball_location = Vector3(struct.slices[i].physics.location)
             ball_location = np.array([struct.slices[i].physics.location.x, struct.slices[i].physics.location.y, struct.slices[i].physics.location.z])
-            # ball_velocity = Vector3(struct.slices[i].physics.velocity).magnitude()
             ball_velocity = np.linalg.norm(np.array([struct.slices[i].physics.velocity.x, struct.slices[i].physics.velocity.y, struct.slices[i].physics.velocity.z]))
 
             if abs(ball_location[1]) > 5250:

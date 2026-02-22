@@ -53,14 +53,12 @@ class aerial_shot():
 
         car_to_ball = self.ball_location - agent.me.location
         # whether we are to the left or right of the shot vector
-        # side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
         side_of_shot = sign(np.dot(np.cross(self.shot_vector, np.array([0, 0, 1])), car_to_ball))
 
         car_to_intercept = self.intercept - agent.me.location
         # car_to_intercept_perp = car_to_intercept.cross((0, 0, side_of_shot))  # perpendicular
         car_to_intercept_perp = np.cross(car_to_intercept, np.array([0, 0, side_of_shot]))
 
-        # distance_remaining = car_to_intercept.flatten().magnitude()
         distance_remaining = magnitude(flatten(car_to_intercept))
 
         speed_required = distance_remaining / time_remaining
@@ -70,13 +68,11 @@ class aerial_shot():
 
         # The adjustment causes the car to circle around the dodge point in an effort to line up with the shot vector
         # The adjustment slowly decreases to 0 as the bot nears the time to jump
-        # adjustment = car_to_intercept.angle(self.shot_vector) * distance_remaining / 1.57  # size of adjustment
         adjustment = angle_between(car_to_intercept, self.shot_vector) * distance_remaining / 1.57
 
         adjustment *= (cap(self.jump_threshold - (acceleration_required[2]), 0.0,
                            self.jump_threshold) / self.jump_threshold)  # factoring in how close to jump we are
         # we don't adjust the final target if we are already jumping
-        # final_target = self.intercept + ((car_to_intercept_perp.normalize() * adjustment) if self.jump_time == 0 else 0)
         norm_perp, _ = normalize(car_to_intercept_perp)
         final_target = self.intercept + ((norm_perp * adjustment) if self.jump_time == 0 else 0)
 
@@ -184,7 +180,6 @@ class goto():
 
         if self.vector is not None:
             # See commends for adjustment in jump_shot or aerial for explanation
-            # side_of_vector = sign(self.vector.cross((0, 0, 1)).dot(car_to_target))
             side_of_vector = sign(np.dot(np.cross(self.vector, np.array([0, 0, 1])), car_to_target))
 
             # car_to_target_perp = car_to_target.cross((0, 0, side_of_vector)).normalize()
@@ -346,11 +341,9 @@ class jump_shot():
         time_remaining = cap(raw_time_remaining, 0.001, 10.0)
         car_to_ball = self.ball_location - agent.me.location
         # whether we are to the left or right of the shot vector
-        # side_of_shot = sign(self.shot_vector.cross((0, 0, 1)).dot(car_to_ball))
         side_of_shot = sign(np.dot(np.cross(self.shot_vector, np.array([0, 0, 1])), car_to_ball))
 
         car_to_dodge_point = self.dodge_point - agent.me.location
-        # car_to_dodge_perp = car_to_dodge_point.cross((0, 0, side_of_shot))  # perpendicular
         car_to_dodge_perp = np.cross(car_to_dodge_point, np.array([0, 0, side_of_shot]))
 
         distance_remaining = magnitude(car_to_dodge_point)
@@ -367,8 +360,6 @@ class jump_shot():
         adjustment *= (cap(self.jump_threshold - (acceleration_required[2]), 0.0,
                            self.jump_threshold) / self.jump_threshold)  # factoring in how close to jump we are
         # we don't adjust the final target if we are already jumping
-        # final_target = self.dodge_point + (
-        #     (car_to_dodge_perp.normalize() * adjustment) if not self.jumping else 0) + Vector3(0, 0, 50)
 
         norm_perp, _ = normalize(car_to_dodge_perp)
         final_target = self.dodge_point + (

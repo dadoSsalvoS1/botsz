@@ -5,7 +5,9 @@ from tools import *
 class ApexBot(GoslingAgent):
     def run(self):
         # Debug drawing
-        loc = game_data_struct.Vector3(self.me.location[0], self.me.location[1], self.me.location[2])
+        # loc = game_data_struct.Vector3(self.me.location[0], self.me.location[1], self.me.location[2])
+        # We use SimpleVector3 for rendering now
+        loc = SimpleVector3(self.me.location[0], self.me.location[1], self.me.location[2])
         self.renderer.draw_string_3d(loc, 2, 2, f"Speed: {round(magnitude(self.me.velocity), 1)}", self.renderer.white())
 
         # If no routine is active, decide on the next one
