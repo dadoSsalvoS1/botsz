@@ -29,7 +29,7 @@ Var EnvKey
 Var EnvVal
 Var TempVal
 Var TempBackupFile
-Var Temp
+Var TmpVar
 Var RegKey
 Var RegValName
 Var RegType
@@ -49,6 +49,7 @@ Section "Main"
     ; Set Environment Variable for Expansion
     System::Call 'Kernel32::SetEnvironmentVariable(t "EXEDIR", t "$EXEDIR")'
     System::Call 'Kernel32::SetEnvironmentVariable(t "DataDir", t "$EXEDIR\$DataDir")'
+    System::Call 'Kernel32::SetEnvironmentVariable(t "AppDir", t "$EXEDIR\$AppDir")'
 
     ; Admin Check
     ${If} $RunAsAdmin == "true"
@@ -68,12 +69,12 @@ Section "Main"
         ExpandEnvStrings $Val "$Val"
 
         ; Check for absolute path (X:\ or \\)
-        StrCpy $Temp $Val 2
-        ${If} $Temp == "\\"
+        StrCpy $TmpVar $Val 2
+        ${If} $TmpVar == "\\"
             ; UNC Path, assume absolute
         ${Else}
-            StrCpy $Temp $Val 2 1
-            ${If} $Temp == ":"
+            StrCpy $TmpVar $Val 1 1
+            ${If} $TmpVar == ":"
                 ; Drive Letter, assume absolute
             ${Else}
                 ; Relative Path, prepend EXEDIR
@@ -84,16 +85,33 @@ Section "Main"
         CreateDirectory "$Val"
     ${Next}
 
+    ; Files Initialization (Copy if destination missing)
+    ReadINIStr $Count "$IniFile" "FilesToCopy" "Count"
+    ${For} $0 1 $Count
+        ReadINIStr $Val "$IniFile" "FilesToCopy" "$0"
+        ${WordFind} "$Val" "|" "+1" $EnvKey  ; Source
+        ${WordFind} "$Val" "|" "+2" $EnvVal  ; Dest
+
+        ExpandEnvStrings $EnvKey "$EnvKey"
+        ExpandEnvStrings $EnvVal "$EnvVal"
+
+        ${If} ${FileExists} "$EnvVal"
+             ; Dest exists, skip
+        ${Else}
+             CopyFiles "$EnvKey" "$EnvVal"
+        ${EndIf}
+    ${Next}
+
     ; Registry Backup
     ReadINIStr $BackupFile "$IniFile" "RegistryBackup" "BackupFile"
     ExpandEnvStrings $BackupFile "$BackupFile"
 
     ; Ensure BackupFile is absolute path
-    StrCpy $Temp $BackupFile 2
-    ${If} $Temp == "\\"
+    StrCpy $TmpVar $BackupFile 2
+    ${If} $TmpVar == "\\"
     ${Else}
-        StrCpy $Temp $BackupFile 2 1
-        ${If} $Temp == ":"
+        StrCpy $TmpVar $BackupFile 1 1
+        ${If} $TmpVar == ":"
         ${Else}
             StrCpy $BackupFile "$EXEDIR\$BackupFile"
         ${EndIf}
@@ -129,14 +147,6 @@ Section "Main"
         ExpandEnvStrings $RegValue "$RegValue"
 
         ${If} $RegType == "SZ"
-            WriteRegStr HKCU "$RegKey" "$RegValName" "$RegValue" ; Assuming HKCU base for simplicity or handle root key parsing
-            ; Actually WriteRegStr requires root key (HKCU, HKLM) as first arg.
-            ; RegKey contains full path e.g. HKCU\Software\...
-            ; WriteRegStr cannot take string variable as root key directly in standard syntax?
-            ; Yes it can: WriteRegStr $0 ... if $0 is HKEY handle? No.
-            ; Standard WriteRegStr takes constant root key.
-            ; To support variable root key, we need logic or Registry plugin.
-            ; Registry plugin: ${registry::Write} "Key\Path" "ValueName" "Value" "Type" $R0
             ${registry::Write} "$RegKey" "$RegValName" "$RegValue" "REG_SZ" $R0
         ${ElseIf} $RegType == "DWORD"
              ${registry::Write} "$RegKey" "$RegValName" "$RegValue" "REG_DWORD" $R0
