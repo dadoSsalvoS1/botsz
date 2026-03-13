@@ -1,56 +1,49 @@
-from utils import *
-from routines import *
-from tools import *
+from utils import GoslingAgent, np_to_rlbot, magnitude
+from strategy import Brain
 
 class ApexBot(GoslingAgent):
+    """
+    Agente ApexBot para Rocket League.
+    Combina as melhores lógicas de diversos bots em uma arquitetura refinada.
+    Utiliza NumPy para todos os cálculos matemáticos e uma classe Brain para estratégia.
+    """
+    def initialize_agent(self):
+        # Chama a inicialização da classe base GoslingAgent
+        super().initialize_agent()
+        # Instancia o cérebro estratégico
+        self.brain = Brain(self)
+
     def run(self):
-        # Debug drawing
-        self.renderer.draw_string_3d(self.me.location, 2, 2, f"Speed: {round(self.me.velocity.magnitude(), 1)}", self.renderer.white())
+        """
+        Método principal executado a cada tick do jogo.
+        Responsável por depuração visual e delegação da estratégia ao Brain.
+        """
+        # 1. Renderização de Depuração (Debug)
+        # Exibe a velocidade atual do carro acima dele no mundo 3D
+        velocity_mag = magnitude(self.me.velocity)
+        self.renderer.draw_string_3d(
+            np_to_rlbot(self.me.location),
+            2, 2,
+            f"Speed: {round(velocity_mag, 1)}",
+            self.renderer.white()
+        )
 
-        # If no routine is active, decide on the next one
-        if len(self.stack) < 1:
-            self.handle_strategy()
-
-    def handle_strategy(self):
-        # 1. Kickoff
-        if self.kickoff_flag:
-            self.push(kickoff())
-            return
-
-        ball_loc = self.ball.location
-
-        # 2. Role Assignment: Are we the closest teammate to the ball?
-        # Include ourselves in the list
-        all_cars = self.friends + [self.me]
-        # Find car with minimum distance to ball
-        closest_car = min(all_cars, key=lambda car: (car.location - ball_loc).magnitude())
-
-        is_closest = (closest_car.index == self.index)
-
-        # 3. Execution
-        if is_closest:
-            # ATTACK MODE
-            # Define target regions (Goal)
-            targets = {
-                "1": (self.foe_goal.left_post, self.foe_goal.right_post)
-            }
-            # Try to find a shot (Aerial, Jump, or Ground)
-            # determine_shot will push the best shot routine, or a short_shot (dribble) if no shot is found.
-            determine_shot(self, self.foe_goal.location, targets, len(targets))
+        # Exibe a rotina atual no topo da pilha para acompanhamento
+        if len(self.stack) > 0:
+            current_routine = self.stack[-1].__class__.__name__
+            self.renderer.draw_string_2d(10, 50, 2, 2, f"Routine: {current_routine}", self.renderer.yellow())
         else:
-            # DEFENSE / SUPPORT MODE (Shadow Defense)
-            # Position ourselves between the ball and our goal, acting as a last line of defense
-            goal_vec = self.friend_goal.location - ball_loc
+            self.renderer.draw_string_2d(10, 50, 2, 2, "Strategy: Idle", self.renderer.cyan())
 
-            # Target a point 1500 units from the ball towards our goal
-            target_distance = 1500
-            target = ball_loc + goal_vec.normalize() * target_distance
+        # 2. Execução da Estratégia
+        # O Brain decide se deve adicionar novas rotinas à pilha (self.stack)
+        self.brain.execute()
 
-            # Ensure the target is on our side of the ball relative to the goal (don't go past the ball)
-            # Actually, the vector math above ensures we are on the goal side of the ball.
-
-            # Simple bounds checking to stay in field
-            if abs(target.x) > 3500: target.x = 3500 * sign(target.x)
-
-            # Go to the defensive position
-            self.push(goto(target))
+        # 3. Linha de alvo (se houver uma rotina ativa com alvo)
+        if len(self.stack) > 0 and hasattr(self.stack[-1], 'target'):
+            try:
+                target_loc = self.stack[-1].target
+                if target_loc is not None:
+                    self.line(self.me.location, target_loc, [0, 255, 0])
+            except:
+                pass
